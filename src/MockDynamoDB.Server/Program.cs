@@ -6,8 +6,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<ITableStore, InMemoryTableStore>();
 builder.Services.AddSingleton<IItemStore, InMemoryItemStore>();
+builder.Services.AddSingleton<ReaderWriterLockSlim>();
 builder.Services.AddSingleton<TableOperations>();
 builder.Services.AddSingleton<ItemOperations>();
+builder.Services.AddSingleton<QueryScanOperations>();
+builder.Services.AddSingleton<BatchOperations>();
+builder.Services.AddSingleton<TransactionOperations>();
 builder.Services.AddSingleton<DynamoDbRequestRouter>();
 
 var portStr = Environment.GetEnvironmentVariable("MOCK_DYNAMODB_PORT");

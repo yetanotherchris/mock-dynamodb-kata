@@ -1,0 +1,371 @@
+using System.Text.Json;
+using MockDynamoDB.Core.Expressions;
+using MockDynamoDB.Core.Models;
+using MockDynamoDB.Core.Storage;
+
+namespace MockDynamoDB.Core.Operations;
+
+public class QueryScanOperations
+{
+    private readonly ITableStore _tableStore;
+    private readonly IItemStore _itemStore;
+
+    public QueryScanOperations(ITableStore tableStore, IItemStore itemStore)
+    {
+        _tableStore = tableStore;
+        _itemStore = itemStore;
+    }
+
+    public JsonDocument Query(JsonDocument request)
+    {
+        var root = request.RootElement;
+        var tableName = root.GetProperty("TableName").GetString()!;
+        var table = _tableStore.GetTable(tableName);
+
+        var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
+            ? ItemOperations.DeserializeStringMap(ean) : null;
+        var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
+            ? ItemOperations.DeserializeItem(eav) : null;
+
+        // Parse KeyConditionExpression
+        if (!root.TryGetProperty("KeyConditionExpression", out var kce))
+            throw new ValidationException("Either the KeyConditions or KeyConditionExpression parameter must be specified");
+
+        var keyCondition = kce.GetString()!;
+        var (pkValue, skCondition) = ParseKeyCondition(keyCondition, expressionAttributeNames, expressionAttributeValues, table);
+
+        // Get items by partition key
+        var items = _itemStore.QueryByPartitionKey(tableName, table.HashKeyName, pkValue);
+
+        // Apply sort key condition
+        if (skCondition != null && table.HasRangeKey)
+        {
+            items = items.Where(item =>
+            {
+                var sk = item.TryGetValue(table.RangeKeyName!, out var v) ? v : null;
+                return sk != null && EvaluateSortKeyCondition(sk, skCondition);
+            }).ToList();
+        }
+
+        // ScanIndexForward
+        bool scanForward = true;
+        if (root.TryGetProperty("ScanIndexForward", out var sif))
+            scanForward = sif.GetBoolean();
+        if (!scanForward)
+            items.Reverse();
+
+        // Pagination: ExclusiveStartKey
+        if (root.TryGetProperty("ExclusiveStartKey", out var esk))
+        {
+            var startKey = ItemOperations.DeserializeItem(esk);
+            var startIndex = FindExclusiveStartIndex(items, startKey, table);
+            if (startIndex >= 0)
+                items = items.Skip(startIndex + 1).ToList();
+            else
+                items = [];
+        }
+
+        // Limit (applied before filter)
+        int? limit = null;
+        if (root.TryGetProperty("Limit", out var lim))
+            limit = lim.GetInt32();
+
+        int scannedCount;
+        bool hasMore = false;
+
+        if (limit.HasValue && items.Count > limit.Value)
+        {
+            items = items.Take(limit.Value).ToList();
+            hasMore = true;
+        }
+        scannedCount = items.Count;
+
+        // FilterExpression
+        if (root.TryGetProperty("FilterExpression", out var fe))
+        {
+            var parser = new ConditionExpressionParser(fe.GetString()!, expressionAttributeNames);
+            var ast = parser.Parse();
+            var evaluator = new ConditionEvaluator(expressionAttributeValues);
+            items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
+        }
+
+        // Select = COUNT
+        string? select = null;
+        if (root.TryGetProperty("Select", out var sel))
+            select = sel.GetString();
+
+        // ProjectionExpression
+        string? projectionExpression = null;
+        if (root.TryGetProperty("ProjectionExpression", out var pe))
+            projectionExpression = pe.GetString();
+
+        if (projectionExpression != null)
+            items = items.Select(item => ItemOperations.ApplyProjection(item, projectionExpression, expressionAttributeNames)).ToList();
+
+        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select);
+    }
+
+    public JsonDocument Scan(JsonDocument request)
+    {
+        var root = request.RootElement;
+        var tableName = root.GetProperty("TableName").GetString()!;
+        var table = _tableStore.GetTable(tableName);
+
+        var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
+            ? ItemOperations.DeserializeStringMap(ean) : null;
+        var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
+            ? ItemOperations.DeserializeItem(eav) : null;
+
+        var items = _itemStore.GetAllItems(tableName);
+
+        // Parallel scan: Segment / TotalSegments
+        if (root.TryGetProperty("TotalSegments", out var ts))
+        {
+            var totalSegments = ts.GetInt32();
+            var segment = root.GetProperty("Segment").GetInt32();
+            items = items.Where(item =>
+            {
+                var pkValue = item[table.HashKeyName];
+                var hash = Fnv1aHash(InMemoryItemStore.GetAttributeKeyString(pkValue));
+                return ((hash % (uint)totalSegments) == (uint)segment);
+            }).ToList();
+        }
+
+        // ExclusiveStartKey
+        if (root.TryGetProperty("ExclusiveStartKey", out var esk))
+        {
+            var startKey = ItemOperations.DeserializeItem(esk);
+            var startIndex = FindExclusiveStartIndex(items, startKey, table);
+            if (startIndex >= 0)
+                items = items.Skip(startIndex + 1).ToList();
+            else
+                items = [];
+        }
+
+        // Limit
+        int? limit = null;
+        if (root.TryGetProperty("Limit", out var lim))
+            limit = lim.GetInt32();
+
+        bool hasMore = false;
+        if (limit.HasValue && items.Count > limit.Value)
+        {
+            items = items.Take(limit.Value).ToList();
+            hasMore = true;
+        }
+        int scannedCount = items.Count;
+
+        // FilterExpression
+        if (root.TryGetProperty("FilterExpression", out var fe))
+        {
+            var parser = new ConditionExpressionParser(fe.GetString()!, expressionAttributeNames);
+            var ast = parser.Parse();
+            var evaluator = new ConditionEvaluator(expressionAttributeValues);
+            items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
+        }
+
+        // Select
+        string? select = null;
+        if (root.TryGetProperty("Select", out var sel))
+            select = sel.GetString();
+
+        // ProjectionExpression
+        string? projectionExpression = null;
+        if (root.TryGetProperty("ProjectionExpression", out var pe))
+            projectionExpression = pe.GetString();
+
+        if (projectionExpression != null)
+            items = items.Select(item => ItemOperations.ApplyProjection(item, projectionExpression, expressionAttributeNames)).ToList();
+
+        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select);
+    }
+
+    private (AttributeValue pkValue, SortKeyCondition? skCondition) ParseKeyCondition(
+        string expression,
+        Dictionary<string, string>? expressionAttributeNames,
+        Dictionary<string, AttributeValue>? expressionAttributeValues,
+        TableDefinition table)
+    {
+        var parser = new ConditionExpressionParser(expression, expressionAttributeNames);
+        var ast = parser.Parse();
+
+        AttributeValue? pkValue = null;
+        SortKeyCondition? skCondition = null;
+
+        ExtractKeyConditions(ast, table, expressionAttributeValues, ref pkValue, ref skCondition);
+
+        if (pkValue == null)
+            throw new ValidationException("Query condition missed key schema element: " + table.HashKeyName);
+
+        return (pkValue, skCondition);
+    }
+
+    private void ExtractKeyConditions(
+        ExpressionNode node,
+        TableDefinition table,
+        Dictionary<string, AttributeValue>? expressionAttributeValues,
+        ref AttributeValue? pkValue,
+        ref SortKeyCondition? skCondition)
+    {
+        if (node is LogicalNode logical && logical.Operator == "AND")
+        {
+            ExtractKeyConditions(logical.Left, table, expressionAttributeValues, ref pkValue, ref skCondition);
+            ExtractKeyConditions(logical.Right, table, expressionAttributeValues, ref pkValue, ref skCondition);
+            return;
+        }
+
+        if (node is ComparisonNode comp)
+        {
+            var pathName = GetPathName(comp.Left);
+            if (pathName == table.HashKeyName && comp.Operator == "=")
+            {
+                pkValue = ResolveExprValue(comp.Right, expressionAttributeValues);
+                return;
+            }
+
+            if (pathName == table.RangeKeyName)
+            {
+                var val = ResolveExprValue(comp.Right, expressionAttributeValues);
+                skCondition = new SortKeyCondition { Operator = comp.Operator, Value = val };
+                return;
+            }
+        }
+
+        if (node is BetweenNode between)
+        {
+            var pathName = GetPathName(between.Value);
+            if (pathName == table.RangeKeyName)
+            {
+                var low = ResolveExprValue(between.Low, expressionAttributeValues);
+                var high = ResolveExprValue(between.High, expressionAttributeValues);
+                skCondition = new SortKeyCondition { Operator = "BETWEEN", Value = low, Value2 = high };
+                return;
+            }
+        }
+
+        if (node is FunctionNode func && func.FunctionName == "begins_with")
+        {
+            var pathName = GetPathName(func.Arguments[0]);
+            if (pathName == table.RangeKeyName)
+            {
+                var prefix = ResolveExprValue(func.Arguments[1], expressionAttributeValues);
+                skCondition = new SortKeyCondition { Operator = "begins_with", Value = prefix };
+                return;
+            }
+        }
+    }
+
+    private string? GetPathName(ExpressionNode node)
+    {
+        if (node is PathNode pathNode && pathNode.Path.Elements.Count == 1 && pathNode.Path.Elements[0] is AttributeElement attr)
+            return attr.Name;
+        return null;
+    }
+
+    private AttributeValue ResolveExprValue(ExpressionNode node, Dictionary<string, AttributeValue>? values)
+    {
+        if (node is ValuePlaceholderNode placeholder)
+        {
+            if (values == null || !values.TryGetValue(placeholder.Placeholder, out var val))
+                throw new ValidationException($"Value {placeholder.Placeholder} not found in ExpressionAttributeValues");
+            return val;
+        }
+        throw new ValidationException("Expected a value placeholder in key condition");
+    }
+
+    private bool EvaluateSortKeyCondition(AttributeValue sk, SortKeyCondition condition)
+    {
+        var cmp = ConditionEvaluator.CompareValues(sk, condition.Value!);
+        if (cmp == null) return false;
+
+        return condition.Operator switch
+        {
+            "=" => cmp == 0,
+            "<" => cmp < 0,
+            "<=" => cmp <= 0,
+            ">" => cmp > 0,
+            ">=" => cmp >= 0,
+            "BETWEEN" =>
+                ConditionEvaluator.CompareValues(sk, condition.Value!) >= 0 &&
+                ConditionEvaluator.CompareValues(sk, condition.Value2!) <= 0,
+            "begins_with" =>
+                sk.S != null && condition.Value!.S != null &&
+                sk.S.StartsWith(condition.Value.S, StringComparison.Ordinal),
+            _ => false
+        };
+    }
+
+    private int FindExclusiveStartIndex(List<Dictionary<string, AttributeValue>> items,
+        Dictionary<string, AttributeValue> startKey, TableDefinition table)
+    {
+        for (int i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            bool match = true;
+            foreach (var kv in startKey)
+            {
+                if (!item.TryGetValue(kv.Key, out var v) || ConditionEvaluator.CompareValues(v, kv.Value) != 0)
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return i;
+        }
+        return -1;
+    }
+
+    private JsonDocument BuildQueryScanResponse(
+        List<Dictionary<string, AttributeValue>> items,
+        int scannedCount,
+        List<Dictionary<string, AttributeValue>>? lastPageItems,
+        TableDefinition table,
+        string? select)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new Utf8JsonWriter(stream);
+        writer.WriteStartObject();
+
+        if (select != "COUNT")
+        {
+            writer.WritePropertyName("Items");
+            ItemOperations.WriteItemsList(writer, items);
+        }
+
+        writer.WriteNumber("Count", items.Count);
+        writer.WriteNumber("ScannedCount", scannedCount);
+
+        // LastEvaluatedKey
+        if (lastPageItems != null && lastPageItems.Count > 0)
+        {
+            var lastItem = lastPageItems[^1];
+            writer.WritePropertyName("LastEvaluatedKey");
+            var lastKey = ItemOperations.ExtractKey(lastItem, table);
+            ItemOperations.WriteItem(writer, lastKey);
+        }
+
+        writer.WriteEndObject();
+        writer.Flush();
+        return JsonDocument.Parse(stream.ToArray());
+    }
+
+    internal static uint Fnv1aHash(string data)
+    {
+        const uint fnvPrime = 0x01000193;
+        const uint fnvOffset = 0x811c9dc5;
+        uint hash = fnvOffset;
+        foreach (char c in data)
+        {
+            hash ^= (byte)c;
+            hash *= fnvPrime;
+        }
+        return hash;
+    }
+
+    private class SortKeyCondition
+    {
+        public string Operator { get; set; } = "";
+        public AttributeValue? Value { get; set; }
+        public AttributeValue? Value2 { get; set; } // for BETWEEN
+    }
+}

@@ -9,11 +9,22 @@ public class DynamoDbRequestRouter
     private const string TargetPrefix = "DynamoDB_20120810.";
     private readonly TableOperations _tableOps;
     private readonly ItemOperations _itemOps;
+    private readonly QueryScanOperations _queryScanOps;
+    private readonly BatchOperations _batchOps;
+    private readonly TransactionOperations _txOps;
 
-    public DynamoDbRequestRouter(TableOperations tableOps, ItemOperations itemOps)
+    public DynamoDbRequestRouter(
+        TableOperations tableOps,
+        ItemOperations itemOps,
+        QueryScanOperations queryScanOps,
+        BatchOperations batchOps,
+        TransactionOperations txOps)
     {
         _tableOps = tableOps;
         _itemOps = itemOps;
+        _queryScanOps = queryScanOps;
+        _batchOps = batchOps;
+        _txOps = txOps;
     }
 
     public async Task HandleRequest(HttpContext context)
@@ -88,6 +99,13 @@ public class DynamoDbRequestRouter
             "PutItem" => _itemOps.PutItem(body),
             "GetItem" => _itemOps.GetItem(body),
             "DeleteItem" => _itemOps.DeleteItem(body),
+            "UpdateItem" => _itemOps.UpdateItem(body),
+            "Query" => _queryScanOps.Query(body),
+            "Scan" => _queryScanOps.Scan(body),
+            "BatchGetItem" => _batchOps.BatchGetItem(body),
+            "BatchWriteItem" => _batchOps.BatchWriteItem(body),
+            "TransactWriteItems" => _txOps.TransactWriteItems(body),
+            "TransactGetItems" => _txOps.TransactGetItems(body),
             _ => throw new UnknownOperationException()
         };
     }

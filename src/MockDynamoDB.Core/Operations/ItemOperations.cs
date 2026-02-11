@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MockDynamoDB.Core.Expressions;
 using MockDynamoDB.Core.Models;
 using MockDynamoDB.Core.Storage;
 
@@ -8,7 +9,7 @@ public class ItemOperations
 {
     private readonly ITableStore _tableStore;
     private readonly IItemStore _itemStore;
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    internal static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null
     };
@@ -32,7 +33,11 @@ public class ItemOperations
         if (root.TryGetProperty("ReturnValues", out var rv))
             returnValues = rv.GetString();
 
-        var oldItem = _itemStore.GetItem(tableName, ExtractKey(item, table));
+        var key = ExtractKey(item, table);
+        var oldItem = _itemStore.GetItem(tableName, key);
+
+        EvaluateConditionExpression(root, oldItem);
+
         _itemStore.PutItem(tableName, item);
 
         return BuildItemResponse(returnValues == "ALL_OLD" ? oldItem : null);
@@ -59,7 +64,7 @@ public class ItemOperations
             expressionAttributeNames = DeserializeStringMap(ean);
 
         if (projectionExpression != null)
-            item = ApplySimpleProjection(item, projectionExpression, expressionAttributeNames);
+            item = ApplyProjection(item, projectionExpression, expressionAttributeNames);
 
         return BuildGetItemResponse(item);
     }
@@ -75,9 +80,129 @@ public class ItemOperations
         if (root.TryGetProperty("ReturnValues", out var rv))
             returnValues = rv.GetString();
 
-        var oldItem = _itemStore.DeleteItem(tableName, key);
+        var oldItem = _itemStore.GetItem(tableName, key);
+        EvaluateConditionExpression(root, oldItem);
 
-        return BuildItemResponse(returnValues == "ALL_OLD" ? oldItem : null);
+        var deleted = _itemStore.DeleteItem(tableName, key);
+
+        return BuildItemResponse(returnValues == "ALL_OLD" ? deleted : null);
+    }
+
+    public JsonDocument UpdateItem(JsonDocument request)
+    {
+        var root = request.RootElement;
+        var tableName = root.GetProperty("TableName").GetString()!;
+        var table = _tableStore.GetTable(tableName);
+        var key = DeserializeItem(root.GetProperty("Key"));
+
+        string? returnValues = null;
+        if (root.TryGetProperty("ReturnValues", out var rv))
+            returnValues = rv.GetString();
+
+        var existingItem = _itemStore.GetItem(tableName, key);
+        EvaluateConditionExpression(root, existingItem);
+
+        // Build item (upsert: create with key if doesn't exist)
+        var item = existingItem ?? new Dictionary<string, AttributeValue>();
+        if (existingItem == null)
+        {
+            // Add key attributes for new item
+            foreach (var kv in key)
+                item[kv.Key] = kv.Value.DeepClone();
+        }
+
+        // Capture old values for UPDATED_OLD
+        var oldItem = existingItem != null ? CloneItem(existingItem) : null;
+
+        // Parse and apply update expression
+        if (root.TryGetProperty("UpdateExpression", out var ue))
+        {
+            var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
+                ? DeserializeStringMap(ean) : null;
+            var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
+                ? DeserializeItem(eav) : null;
+
+            var parser = new UpdateExpressionParser(ue.GetString()!, expressionAttributeNames);
+            var actions = parser.Parse();
+            var evaluator = new UpdateEvaluator(expressionAttributeValues);
+            evaluator.Apply(actions, item);
+        }
+
+        _itemStore.PutItem(tableName, item);
+
+        // Determine return value
+        Dictionary<string, AttributeValue>? returnItem = returnValues switch
+        {
+            "ALL_OLD" => oldItem,
+            "ALL_NEW" => CloneItem(item),
+            "UPDATED_OLD" => GetUpdatedAttributes(oldItem, item, returnOld: true),
+            "UPDATED_NEW" => GetUpdatedAttributes(oldItem, item, returnOld: false),
+            _ => null
+        };
+
+        return BuildItemResponse(returnItem);
+    }
+
+    private static void EvaluateConditionExpression(JsonElement root, Dictionary<string, AttributeValue>? existingItem)
+    {
+        if (!root.TryGetProperty("ConditionExpression", out var ce))
+            return;
+
+        var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
+            ? DeserializeStringMap(ean) : null;
+        var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
+            ? DeserializeItem(eav) : null;
+
+        var parser = new ConditionExpressionParser(ce.GetString()!, expressionAttributeNames);
+        var ast = parser.Parse();
+        var evaluator = new ConditionEvaluator(expressionAttributeValues);
+
+        var itemToCheck = existingItem ?? new Dictionary<string, AttributeValue>();
+        if (!evaluator.Evaluate(ast, itemToCheck))
+            throw new ConditionalCheckFailedException();
+    }
+
+    private static Dictionary<string, AttributeValue>? GetUpdatedAttributes(
+        Dictionary<string, AttributeValue>? oldItem,
+        Dictionary<string, AttributeValue> newItem,
+        bool returnOld)
+    {
+        if (oldItem == null)
+            return returnOld ? null : CloneItem(newItem);
+
+        var result = new Dictionary<string, AttributeValue>();
+        var allKeys = new HashSet<string>(oldItem.Keys);
+        allKeys.UnionWith(newItem.Keys);
+
+        foreach (var attrKey in allKeys)
+        {
+            var hadOld = oldItem.TryGetValue(attrKey, out var oldVal);
+            var hasNew = newItem.TryGetValue(attrKey, out var newVal);
+
+            bool changed;
+            if (hadOld && hasNew)
+                changed = !AttributeValuesEqual(oldVal!, newVal!);
+            else
+                changed = true;
+
+            if (changed)
+            {
+                if (returnOld && hadOld)
+                    result[attrKey] = oldVal!.DeepClone();
+                else if (!returnOld && hasNew)
+                    result[attrKey] = newVal!.DeepClone();
+            }
+        }
+
+        return result;
+    }
+
+    private static bool AttributeValuesEqual(AttributeValue a, AttributeValue b)
+    {
+        if (a.Type != b.Type) return false;
+        var jsonA = JsonSerializer.Serialize(a, JsonOptions);
+        var jsonB = JsonSerializer.Serialize(b, JsonOptions);
+        return jsonA == jsonB;
     }
 
     internal static Dictionary<string, AttributeValue> DeserializeItem(JsonElement element)
@@ -123,67 +248,63 @@ public class ItemOperations
         return key;
     }
 
-    internal static Dictionary<string, AttributeValue> ApplySimpleProjection(
+    internal static Dictionary<string, AttributeValue> ApplyProjection(
         Dictionary<string, AttributeValue> item,
         string projectionExpression,
         Dictionary<string, string>? expressionAttributeNames)
     {
-        var attrs = projectionExpression.Split(',').Select(s => s.Trim()).ToList();
+        var paths = DocumentPath.ParseProjection(projectionExpression, expressionAttributeNames);
         var result = new Dictionary<string, AttributeValue>();
 
-        foreach (var attr in attrs)
+        foreach (var path in paths)
         {
-            var resolvedName = attr;
-            if (expressionAttributeNames != null && expressionAttributeNames.TryGetValue(attr, out var mapped))
-                resolvedName = mapped;
+            var value = path.Resolve(item);
+            if (value == null) continue;
 
-            if (resolvedName.Contains('.'))
+            if (path.Elements.Count == 1 && path.Elements[0] is AttributeElement attr)
             {
-                ApplyNestedProjection(item, resolvedName, result);
+                result[attr.Name] = value.DeepClone();
             }
-            else if (item.TryGetValue(resolvedName, out var value))
+            else
             {
-                result[resolvedName] = value.DeepClone();
+                // Nested projection - rebuild structure
+                var rootAttr = ((AttributeElement)path.Elements[0]).Name;
+                BuildNestedResult(result, path, value, rootAttr);
             }
         }
 
         return result;
     }
 
-    private static void ApplyNestedProjection(
-        Dictionary<string, AttributeValue> item,
-        string path,
-        Dictionary<string, AttributeValue> result)
+    private static void BuildNestedResult(
+        Dictionary<string, AttributeValue> result,
+        DocumentPath path,
+        AttributeValue value,
+        string rootAttr)
     {
-        var parts = path.Split('.');
-        if (!item.TryGetValue(parts[0], out var current))
-            return;
+        if (!result.ContainsKey(rootAttr))
+            result[rootAttr] = new AttributeValue { M = new Dictionary<string, AttributeValue>() };
 
-        var nav = current;
-        for (int i = 1; i < parts.Length; i++)
+        var current = result[rootAttr];
+        for (int i = 1; i < path.Elements.Count - 1; i++)
         {
-            if (nav.M == null || !nav.M.TryGetValue(parts[i], out var next))
-                return;
-            nav = next;
+            if (path.Elements[i] is AttributeElement attr)
+            {
+                if (current.M == null)
+                    current.M = new Dictionary<string, AttributeValue>();
+                if (!current.M.ContainsKey(attr.Name))
+                    current.M[attr.Name] = new AttributeValue { M = new Dictionary<string, AttributeValue>() };
+                current = current.M[attr.Name];
+            }
         }
 
-        // Build the nested structure in result
-        if (!result.ContainsKey(parts[0]))
-            result[parts[0]] = new AttributeValue { M = new Dictionary<string, AttributeValue>() };
-
-        var target = result[parts[0]];
-        for (int i = 1; i < parts.Length - 1; i++)
+        var lastElement = path.Elements[^1];
+        if (lastElement is AttributeElement lastAttr)
         {
-            if (target.M == null)
-                target.M = new Dictionary<string, AttributeValue>();
-            if (!target.M.ContainsKey(parts[i]))
-                target.M[parts[i]] = new AttributeValue { M = new Dictionary<string, AttributeValue>() };
-            target = target.M[parts[i]];
+            if (current.M == null)
+                current.M = new Dictionary<string, AttributeValue>();
+            current.M[lastAttr.Name] = value.DeepClone();
         }
-
-        if (target.M == null)
-            target.M = new Dictionary<string, AttributeValue>();
-        target.M[parts[^1]] = nav.DeepClone();
     }
 
     internal static JsonDocument BuildItemResponse(Dictionary<string, AttributeValue>? attributes)
@@ -238,5 +359,10 @@ public class ItemOperations
             WriteItem(writer, item);
         }
         writer.WriteEndArray();
+    }
+
+    private static Dictionary<string, AttributeValue> CloneItem(Dictionary<string, AttributeValue> item)
+    {
+        return item.ToDictionary(kv => kv.Key, kv => kv.Value.DeepClone());
     }
 }
