@@ -22,6 +22,19 @@ public class QueryScanOperations
         var tableName = root.GetProperty("TableName").GetString()!;
         var table = _tableStore.GetTable(tableName);
 
+        // Check for index query
+        LocalSecondaryIndexDefinition? lsiDef = null;
+        string? indexName = null;
+        if (root.TryGetProperty("IndexName", out var idx))
+        {
+            indexName = idx.GetString();
+            lsiDef = table.LocalSecondaryIndexes?.FirstOrDefault(l => l.IndexName == indexName);
+            if (lsiDef == null)
+                throw new ValidationException($"The table does not have the specified index: {indexName}");
+        }
+
+        var effectiveRangeKeyName = lsiDef?.RangeKeyName ?? table.RangeKeyName;
+
         var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
             ? ItemOperations.DeserializeStringMap(ean) : null;
         var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
@@ -32,17 +45,21 @@ public class QueryScanOperations
             throw new ValidationException("Either the KeyConditions or KeyConditionExpression parameter must be specified");
 
         var keyCondition = kce.GetString()!;
-        var (pkValue, skCondition) = ParseKeyCondition(keyCondition, expressionAttributeNames, expressionAttributeValues, table);
+        var (pkValue, skCondition) = ParseKeyCondition(keyCondition, expressionAttributeNames, expressionAttributeValues, table.HashKeyName, effectiveRangeKeyName);
 
         // Get items by partition key
-        var items = _itemStore.QueryByPartitionKey(tableName, table.HashKeyName, pkValue);
+        List<Dictionary<string, AttributeValue>> items;
+        if (indexName != null)
+            items = _itemStore.QueryByPartitionKeyOnIndex(tableName, indexName, table.HashKeyName, pkValue);
+        else
+            items = _itemStore.QueryByPartitionKey(tableName, table.HashKeyName, pkValue);
 
         // Apply sort key condition
-        if (skCondition != null && table.HasRangeKey)
+        if (skCondition != null && effectiveRangeKeyName != null)
         {
             items = items.Where(item =>
             {
-                var sk = item.TryGetValue(table.RangeKeyName!, out var v) ? v : null;
+                var sk = item.TryGetValue(effectiveRangeKeyName, out var v) ? v : null;
                 return sk != null && EvaluateSortKeyCondition(sk, skCondition);
             }).ToList();
         }
@@ -102,7 +119,7 @@ public class QueryScanOperations
         if (projectionExpression != null)
             items = items.Select(item => ItemOperations.ApplyProjection(item, projectionExpression, expressionAttributeNames)).ToList();
 
-        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select);
+        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select, lsiDef);
     }
 
     public JsonDocument Scan(JsonDocument request)
@@ -184,7 +201,8 @@ public class QueryScanOperations
         string expression,
         Dictionary<string, string>? expressionAttributeNames,
         Dictionary<string, AttributeValue>? expressionAttributeValues,
-        TableDefinition table)
+        string hashKeyName,
+        string? rangeKeyName)
     {
         var parser = new ConditionExpressionParser(expression, expressionAttributeNames);
         var ast = parser.Parse();
@@ -192,38 +210,39 @@ public class QueryScanOperations
         AttributeValue? pkValue = null;
         SortKeyCondition? skCondition = null;
 
-        ExtractKeyConditions(ast, table, expressionAttributeValues, ref pkValue, ref skCondition);
+        ExtractKeyConditions(ast, hashKeyName, rangeKeyName, expressionAttributeValues, ref pkValue, ref skCondition);
 
         if (pkValue == null)
-            throw new ValidationException("Query condition missed key schema element: " + table.HashKeyName);
+            throw new ValidationException("Query condition missed key schema element: " + hashKeyName);
 
         return (pkValue, skCondition);
     }
 
     private void ExtractKeyConditions(
         ExpressionNode node,
-        TableDefinition table,
+        string hashKeyName,
+        string? rangeKeyName,
         Dictionary<string, AttributeValue>? expressionAttributeValues,
         ref AttributeValue? pkValue,
         ref SortKeyCondition? skCondition)
     {
         if (node is LogicalNode logical && logical.Operator == "AND")
         {
-            ExtractKeyConditions(logical.Left, table, expressionAttributeValues, ref pkValue, ref skCondition);
-            ExtractKeyConditions(logical.Right, table, expressionAttributeValues, ref pkValue, ref skCondition);
+            ExtractKeyConditions(logical.Left, hashKeyName, rangeKeyName, expressionAttributeValues, ref pkValue, ref skCondition);
+            ExtractKeyConditions(logical.Right, hashKeyName, rangeKeyName, expressionAttributeValues, ref pkValue, ref skCondition);
             return;
         }
 
         if (node is ComparisonNode comp)
         {
             var pathName = GetPathName(comp.Left);
-            if (pathName == table.HashKeyName && comp.Operator == "=")
+            if (pathName == hashKeyName && comp.Operator == "=")
             {
                 pkValue = ResolveExprValue(comp.Right, expressionAttributeValues);
                 return;
             }
 
-            if (pathName == table.RangeKeyName)
+            if (pathName == rangeKeyName)
             {
                 var val = ResolveExprValue(comp.Right, expressionAttributeValues);
                 skCondition = new SortKeyCondition { Operator = comp.Operator, Value = val };
@@ -234,7 +253,7 @@ public class QueryScanOperations
         if (node is BetweenNode between)
         {
             var pathName = GetPathName(between.Value);
-            if (pathName == table.RangeKeyName)
+            if (pathName == rangeKeyName)
             {
                 var low = ResolveExprValue(between.Low, expressionAttributeValues);
                 var high = ResolveExprValue(between.High, expressionAttributeValues);
@@ -246,7 +265,7 @@ public class QueryScanOperations
         if (node is FunctionNode func && func.FunctionName == "begins_with")
         {
             var pathName = GetPathName(func.Arguments[0]);
-            if (pathName == table.RangeKeyName)
+            if (pathName == rangeKeyName)
             {
                 var prefix = ResolveExprValue(func.Arguments[1], expressionAttributeValues);
                 skCondition = new SortKeyCondition { Operator = "begins_with", Value = prefix };
@@ -320,7 +339,8 @@ public class QueryScanOperations
         int scannedCount,
         List<Dictionary<string, AttributeValue>>? lastPageItems,
         TableDefinition table,
-        string? select)
+        string? select,
+        LocalSecondaryIndexDefinition? lsiDef = null)
     {
         using var stream = new MemoryStream();
         using var writer = new Utf8JsonWriter(stream);
@@ -341,6 +361,8 @@ public class QueryScanOperations
             var lastItem = lastPageItems[^1];
             writer.WritePropertyName("LastEvaluatedKey");
             var lastKey = ItemOperations.ExtractKey(lastItem, table);
+            if (lsiDef != null && lastItem.TryGetValue(lsiDef.RangeKeyName, out var lsiSkVal))
+                lastKey[lsiDef.RangeKeyName] = lsiSkVal;
             ItemOperations.WriteItem(writer, lastKey);
         }
 

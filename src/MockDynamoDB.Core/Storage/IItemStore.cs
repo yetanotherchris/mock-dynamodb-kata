@@ -9,6 +9,7 @@ public interface IItemStore
     Dictionary<string, AttributeValue>? DeleteItem(string tableName, Dictionary<string, AttributeValue> key);
     List<Dictionary<string, AttributeValue>> GetAllItems(string tableName);
     List<Dictionary<string, AttributeValue>> QueryByPartitionKey(string tableName, string pkName, AttributeValue pkValue);
+    List<Dictionary<string, AttributeValue>> QueryByPartitionKeyOnIndex(string tableName, string indexName, string pkName, AttributeValue pkValue);
     void EnsureTable(string tableName);
     void RemoveTable(string tableName);
 }

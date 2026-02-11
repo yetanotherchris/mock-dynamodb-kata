@@ -32,10 +32,18 @@ public class InMemoryItemStore : IItemStore
 
         var partition = data.Partitions.GetOrAdd(pkValue, _ => new SortedList<string, Dictionary<string, AttributeValue>>(StringComparer.Ordinal));
 
+        Dictionary<string, AttributeValue>? oldItem = null;
         lock (partition)
         {
+            partition.TryGetValue(skValue, out oldItem);
             var cloned = CloneItem(item);
             partition[skValue] = cloned;
+        }
+
+        if (table.LocalSecondaryIndexes is { Count: > 0 })
+        {
+            foreach (var lsi in table.LocalSecondaryIndexes)
+                UpdateLsiOnPut(data, lsi, pkValue, skValue, oldItem, item);
         }
 
         UpdateTableMetrics(tableName);
@@ -67,19 +75,26 @@ public class InMemoryItemStore : IItemStore
         if (!data.Partitions.TryGetValue(pkValue, out var partition))
             return null;
 
+        Dictionary<string, AttributeValue>? existing;
         lock (partition)
         {
-            if (!partition.TryGetValue(skValue, out var existing))
+            if (!partition.TryGetValue(skValue, out existing))
                 return null;
 
             partition.Remove(skValue);
 
             if (partition.Count == 0)
                 data.Partitions.TryRemove(pkValue, out _);
-
-            UpdateTableMetrics(tableName);
-            return CloneItem(existing);
         }
+
+        if (table.LocalSecondaryIndexes is { Count: > 0 })
+        {
+            foreach (var lsi in table.LocalSecondaryIndexes)
+                RemoveFromLsiIndex(data, lsi, pkValue, skValue, existing);
+        }
+
+        UpdateTableMetrics(tableName);
+        return CloneItem(existing);
     }
 
     public List<Dictionary<string, AttributeValue>> GetAllItems(string tableName)
@@ -180,8 +195,93 @@ public class InMemoryItemStore : IItemStore
         return item.ToDictionary(kv => kv.Key, kv => kv.Value.DeepClone());
     }
 
+    public List<Dictionary<string, AttributeValue>> QueryByPartitionKeyOnIndex(
+        string tableName, string indexName, string pkName, AttributeValue pkValue)
+    {
+        var data = GetTableData(tableName);
+        var pkString = GetAttributeKeyString(pkValue);
+
+        if (!data.Indexes.TryGetValue(indexName, out var indexData))
+            return [];
+
+        if (!indexData.TryGetValue(pkString, out var partition))
+            return [];
+
+        lock (partition)
+        {
+            return partition.Values.Select(CloneItem).ToList();
+        }
+    }
+
+    private void UpdateLsiOnPut(
+        TableData data,
+        LocalSecondaryIndexDefinition lsi,
+        string pkString,
+        string tableSkString,
+        Dictionary<string, AttributeValue>? oldItem,
+        Dictionary<string, AttributeValue> newItem)
+    {
+        var indexData = data.Indexes.GetOrAdd(lsi.IndexName,
+            _ => new ConcurrentDictionary<string, SortedList<string, Dictionary<string, AttributeValue>>>());
+        var lsiSkName = lsi.RangeKeyName;
+
+        // Remove old entry
+        if (oldItem != null && oldItem.TryGetValue(lsiSkName, out var oldLsiSk))
+        {
+            var oldCompositeKey = GetAttributeKeyString(oldLsiSk) + "\0" + tableSkString;
+            if (indexData.TryGetValue(pkString, out var oldPartition))
+            {
+                lock (oldPartition)
+                {
+                    oldPartition.Remove(oldCompositeKey);
+                    if (oldPartition.Count == 0)
+                        indexData.TryRemove(pkString, out _);
+                }
+            }
+        }
+
+        // Add new entry (only if item has the LSI sort key)
+        if (newItem.TryGetValue(lsiSkName, out var newLsiSk))
+        {
+            var compositeKey = GetAttributeKeyString(newLsiSk) + "\0" + tableSkString;
+            var partition = indexData.GetOrAdd(pkString,
+                _ => new SortedList<string, Dictionary<string, AttributeValue>>(StringComparer.Ordinal));
+            lock (partition)
+            {
+                partition[compositeKey] = CloneItem(newItem);
+            }
+        }
+    }
+
+    private void RemoveFromLsiIndex(
+        TableData data,
+        LocalSecondaryIndexDefinition lsi,
+        string pkString,
+        string tableSkString,
+        Dictionary<string, AttributeValue> item)
+    {
+        var lsiSkName = lsi.RangeKeyName;
+        if (!item.TryGetValue(lsiSkName, out var lsiSk))
+            return;
+
+        if (!data.Indexes.TryGetValue(lsi.IndexName, out var indexData))
+            return;
+
+        var compositeKey = GetAttributeKeyString(lsiSk) + "\0" + tableSkString;
+        if (indexData.TryGetValue(pkString, out var partition))
+        {
+            lock (partition)
+            {
+                partition.Remove(compositeKey);
+                if (partition.Count == 0)
+                    indexData.TryRemove(pkString, out _);
+            }
+        }
+    }
+
     private class TableData
     {
         public ConcurrentDictionary<string, SortedList<string, Dictionary<string, AttributeValue>>> Partitions { get; } = new();
+        public ConcurrentDictionary<string, ConcurrentDictionary<string, SortedList<string, Dictionary<string, AttributeValue>>>> Indexes { get; } = new();
     }
 }
