@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/out/
+**/.vs/
+**/node_modules/
+tests/
+reference/
+openspec/
+*.md
+.gitignore
+.dockerignore
