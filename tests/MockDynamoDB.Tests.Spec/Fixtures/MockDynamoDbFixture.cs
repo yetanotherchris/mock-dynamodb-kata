@@ -1,3 +1,4 @@
+using Amazon;
 using Amazon.DynamoDBv2;
 using Amazon.Runtime;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -7,24 +8,25 @@ namespace MockDynamoDB.Tests.Spec.Fixtures;
 public class MockDynamoDbFixture : IAsyncLifetime
 {
     private WebApplicationFactory<Program>? _factory;
-    private HttpClient? _httpClient;
 
     public AmazonDynamoDBClient Client { get; private set; } = null!;
 
     public ValueTask InitializeAsync()
     {
-        _factory = new WebApplicationFactory<Program>();
-        _httpClient = _factory.CreateClient();
+        AWSConfigs.DisableDangerousDisablePathAndQueryCanonicalization = true;
 
+        _factory = new WebApplicationFactory<Program>();
+
+        var handler = _factory.Server.CreateHandler();
         var config = new AmazonDynamoDBConfig
         {
-            ServiceURL = _httpClient.BaseAddress!.ToString(),
+            ServiceURL = _factory.Server.BaseAddress.ToString(),
             AuthenticationRegion = "us-east-1"
         };
 
-        var credentials = new BasicAWSCredentials("fake", "fake");
+        config.HttpClientFactory = new TestHttpClientFactory(handler);
 
-        config.HttpClientFactory = new TestHttpClientFactory(_factory.Server.CreateHandler());
+        var credentials = new BasicAWSCredentials("fake", "fake");
         Client = new AmazonDynamoDBClient(credentials, config);
 
         return ValueTask.CompletedTask;
@@ -33,7 +35,6 @@ public class MockDynamoDbFixture : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         Client?.Dispose();
-        _httpClient?.Dispose();
         if (_factory != null)
             await _factory.DisposeAsync();
     }
