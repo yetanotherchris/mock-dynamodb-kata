@@ -1,6 +1,6 @@
-# Mock DynamoDB
+# Mock DynamoDB (Kata)
 
-In-memory mock DynamoDB server for local integration testing. Replaces DynamoDB Local (Java) or LocalStack.
+In-memory mock DynamoDB server for local integration testing. 
 
 ## Usage
 

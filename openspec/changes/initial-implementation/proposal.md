@@ -1,7 +1,7 @@
 # Initial Implementation Proposal
 
 ## Problem
-Integration tests against DynamoDB require either DynamoDB Local (Java JAR) or LocalStack, both of which are heavy dependencies. A lightweight, purpose-built mock in C#/.NET running in Docker would be simpler to use and faster to start.
+Integration tests against DynamoDB require either DynamoDB Local (Java JAR), both of which are heavy dependencies. A lightweight, purpose-built mock in C#/.NET running in Docker would be simpler to use and faster to start.
 
 ## Solution
 Build a mock DynamoDB server that implements the DynamoDB JSON wire protocol for the most commonly used operations. Not production-grade; designed purely for local integration testing.
@@ -24,3 +24,7 @@ Build a mock DynamoDB server that implements the DynamoDB JSON wire protocol for
 - PartiQL support
 - Backup/restore operations
 - Global tables
+
+Note - all the AWS models are available using Smithy, including DynamoDB. You might be able to use this, if there is a C# smithy reader (if not, perhaps another language could convert the smithy files)
+
+https://github.com/aws/api-models-aws/blob/main/models/dynamodb/service/2012-08-10/dynamodb-2012-08-10.json
