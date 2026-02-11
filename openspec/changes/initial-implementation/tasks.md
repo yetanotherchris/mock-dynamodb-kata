@@ -2,60 +2,60 @@
 
 ## Phase 1: Skeleton + Table Operations
 - [x] Create solution and project structure
-- [ ] HTTP routing middleware (POST /, X-Amz-Target dispatch)
-- [ ] CreateTable, DeleteTable, DescribeTable, ListTables
-- [ ] In-memory table store
+- [x] HTTP routing middleware (POST /, X-Amz-Target dispatch)
+- [x] CreateTable, DeleteTable, DescribeTable, ListTables
+- [x] In-memory table store
 
 ## Phase 2: Item CRUD
-- [ ] AttributeValue model
-- [ ] DynamoDbJsonSerializer
-- [ ] InMemoryItemStore
-- [ ] PutItem, GetItem, DeleteItem handlers
+- [x] AttributeValue model
+- [x] DynamoDbJsonSerializer
+- [x] InMemoryItemStore
+- [x] PutItem, GetItem, DeleteItem handlers
 
 ## Phase 3: Expression Engine
-- [ ] Tokenizer
-- [ ] Document path parser
-- [ ] ExpressionAttributeNames/Values resolution
-- [ ] ProjectionExpression
+- [x] Tokenizer
+- [x] Document path parser
+- [x] ExpressionAttributeNames/Values resolution
+- [x] ProjectionExpression
 
 ## Phase 4: ConditionExpression + FilterExpression
-- [ ] Condition parser (AST)
-- [ ] Comparison operators and functions
-- [ ] Condition evaluator
-- [ ] Wire into PutItem, DeleteItem
+- [x] Condition parser (AST)
+- [x] Comparison operators and functions
+- [x] Condition evaluator
+- [x] Wire into PutItem, DeleteItem
 
 ## Phase 5: UpdateExpression + UpdateItem
-- [ ] Update expression parser (SET, REMOVE, ADD, DELETE)
-- [ ] SET functions (if_not_exists, list_append, arithmetic)
-- [ ] ReturnValues support
-- [ ] UpdateItem handler
+- [x] Update expression parser (SET, REMOVE, ADD, DELETE)
+- [x] SET functions (if_not_exists, list_append, arithmetic)
+- [x] ReturnValues support
+- [x] UpdateItem handler
 
 ## Phase 6: Query
-- [ ] KeyConditionExpression parser
-- [ ] Query handler with pagination
-- [ ] ScanIndexForward
-- [ ] FilterExpression + ProjectionExpression on query
+- [x] KeyConditionExpression parser
+- [x] Query handler with pagination
+- [x] ScanIndexForward
+- [x] FilterExpression + ProjectionExpression on query
 
 ## Phase 7: Scan
-- [ ] Scan handler with pagination
-- [ ] Parallel scan (FNV-1a segment assignment)
-- [ ] FilterExpression + ProjectionExpression on scan
+- [x] Scan handler with pagination
+- [x] Parallel scan (FNV-1a segment assignment)
+- [x] FilterExpression + ProjectionExpression on scan
 
 ## Phase 8: LSI
-- [ ] LSI validation on CreateTable
-- [ ] Per-LSI index maintenance
-- [ ] Query with IndexName
+- [x] LSI validation on CreateTable
+- [x] Per-LSI index maintenance
+- [x] Query with IndexName
 
 ## Phase 9: Batch Operations
-- [ ] BatchGetItem
-- [ ] BatchWriteItem
+- [x] BatchGetItem
+- [x] BatchWriteItem
 
 ## Phase 10: Transactions
-- [ ] TransactWriteItems
-- [ ] TransactGetItems
-- [ ] ReaderWriterLockSlim isolation
+- [x] TransactWriteItems
+- [x] TransactGetItems
+- [x] ReaderWriterLockSlim isolation
 
 ## Phase 11: Docker + Polish
-- [ ] Multi-stage Dockerfile
-- [ ] Health check endpoint
-- [ ] Review and edge case fixes
+- [x] Multi-stage Dockerfile
+- [x] Health check endpoint
+- [x] Review and edge case fixes
