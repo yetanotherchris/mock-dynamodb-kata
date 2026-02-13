@@ -1,10 +1,12 @@
 name: Build and Test
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+# TODO: Enable as part of the aws-sdk-v4-integration feature
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
+on: workflow_dispatch
 
 jobs:
   build-and-test:
