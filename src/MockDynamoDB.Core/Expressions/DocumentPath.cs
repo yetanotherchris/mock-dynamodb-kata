@@ -6,73 +6,11 @@ public class DocumentPath
 {
     public List<PathElement> Elements { get; } = [];
 
-    public static DocumentPath Parse(List<Token> tokens, ref int pos,
-        Dictionary<string, string>? expressionAttributeNames = null)
+    public DocumentPath() { }
+
+    public DocumentPath(List<PathElement> elements)
     {
-        var path = new DocumentPath();
-
-        // First element must be an identifier or name placeholder
-        var token = tokens[pos];
-        if (token.Type == TokenType.NamePlaceholder)
-        {
-            var name = ResolveName(token.Value, expressionAttributeNames);
-            path.Elements.Add(new AttributeElement(name));
-            pos++;
-        }
-        else if (token.Type == TokenType.Identifier)
-        {
-            path.Elements.Add(new AttributeElement(token.Value));
-            pos++;
-        }
-        else
-        {
-            throw new ValidationException($"Expected attribute name at position {token.Position}");
-        }
-
-        // Continue with dots and brackets
-        while (pos < tokens.Count)
-        {
-            token = tokens[pos];
-            if (token.Type == TokenType.Dot)
-            {
-                pos++;
-                token = tokens[pos];
-                if (token.Type == TokenType.NamePlaceholder)
-                {
-                    var name = ResolveName(token.Value, expressionAttributeNames);
-                    path.Elements.Add(new AttributeElement(name));
-                    pos++;
-                }
-                else if (token.Type == TokenType.Identifier)
-                {
-                    path.Elements.Add(new AttributeElement(token.Value));
-                    pos++;
-                }
-                else
-                {
-                    throw new ValidationException($"Expected attribute name after '.' at position {token.Position}");
-                }
-            }
-            else if (token.Type == TokenType.LeftBracket)
-            {
-                pos++;
-                token = tokens[pos];
-                if (token.Type != TokenType.Number)
-                    throw new ValidationException($"Expected numeric index at position {token.Position}");
-                path.Elements.Add(new IndexElement(int.Parse(token.Value)));
-                pos++;
-                token = tokens[pos];
-                if (token.Type != TokenType.RightBracket)
-                    throw new ValidationException($"Expected ']' at position {token.Position}");
-                pos++;
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        return path;
+        Elements = elements;
     }
 
     public static List<DocumentPath> ParseProjection(string expression,
@@ -86,13 +24,35 @@ public class DocumentPath
             var trimmed = part.Trim();
             if (string.IsNullOrEmpty(trimmed)) continue;
 
-            var tokenizer = new Tokenizer(trimmed);
-            var tokens = tokenizer.Tokenize();
-            var pos = 0;
-            paths.Add(Parse(tokens, ref pos, expressionAttributeNames));
+            paths.Add(ParseSinglePath(trimmed, expressionAttributeNames));
         }
 
         return paths;
+    }
+
+    private static DocumentPath ParseSinglePath(string expression,
+        Dictionary<string, string>? expressionAttributeNames)
+    {
+        var input = new Antlr4.Runtime.AntlrInputStream(expression);
+        var lexer = new Grammar.DynamoDbConditionLexer(input);
+        lexer.RemoveErrorListeners();
+        lexer.AddErrorListener(DynamoDbExpressionParser.ThrowingErrorListener.Instance);
+
+        var tokens = new Antlr4.Runtime.CommonTokenStream(lexer);
+        var parser = new Grammar.DynamoDbConditionParser(tokens);
+        parser.RemoveErrorListeners();
+        parser.AddErrorListener(DynamoDbExpressionParser.ThrowingErrorListener.Instance);
+
+        var tree = parser.documentPath();
+        return ConditionExpressionVisitor.BuildDocumentPath(tree, expressionAttributeNames);
+    }
+
+    internal static string ResolveName(string placeholder, Dictionary<string, string>? names)
+    {
+        if (names == null || !names.TryGetValue(placeholder, out var resolved))
+            throw new ValidationException(
+                $"Value provided in ExpressionAttributeNames unused in expressions: keys: {{{placeholder}}}");
+        return resolved;
     }
 
     public AttributeValue? Resolve(Dictionary<string, AttributeValue> item)
@@ -225,14 +185,6 @@ public class DocumentPath
                     current.L.RemoveAt(idx.Index);
                 break;
         }
-    }
-
-    private static string ResolveName(string placeholder, Dictionary<string, string>? names)
-    {
-        if (names == null || !names.TryGetValue(placeholder, out var resolved))
-            throw new ValidationException(
-                $"Value provided in ExpressionAttributeNames unused in expressions: keys: {{{placeholder}}}");
-        return resolved;
     }
 }
 

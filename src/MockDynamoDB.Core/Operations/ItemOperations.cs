@@ -122,8 +122,7 @@ public class ItemOperations
             var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
                 ? DeserializeItem(eav) : null;
 
-            var parser = new UpdateExpressionParser(ue.GetString()!, expressionAttributeNames);
-            var actions = parser.Parse();
+            var actions = DynamoDbExpressionParser.ParseUpdate(ue.GetString()!, expressionAttributeNames);
             var evaluator = new UpdateEvaluator(expressionAttributeValues);
             evaluator.Apply(actions, item);
         }
@@ -153,8 +152,7 @@ public class ItemOperations
         var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
             ? DeserializeItem(eav) : null;
 
-        var parser = new ConditionExpressionParser(ce.GetString()!, expressionAttributeNames);
-        var ast = parser.Parse();
+        var ast = DynamoDbExpressionParser.ParseCondition(ce.GetString()!, expressionAttributeNames);
         var evaluator = new ConditionEvaluator(expressionAttributeValues);
 
         var itemToCheck = existingItem ?? new Dictionary<string, AttributeValue>();

@@ -108,3 +108,11 @@ public class ArithmeticNode : ExpressionNode
         Right = right;
     }
 }
+
+// Update action for SET, REMOVE, ADD, DELETE clauses
+public class UpdateAction
+{
+    public string Type { get; set; } = ""; // SET, REMOVE, ADD, DELETE
+    public DocumentPath Path { get; set; } = null!;
+    public ExpressionNode? Value { get; set; }
+}

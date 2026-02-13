@@ -100,8 +100,7 @@ public class QueryScanOperations
         // FilterExpression
         if (root.TryGetProperty("FilterExpression", out var fe))
         {
-            var parser = new ConditionExpressionParser(fe.GetString()!, expressionAttributeNames);
-            var ast = parser.Parse();
+            var ast = DynamoDbExpressionParser.ParseCondition(fe.GetString()!, expressionAttributeNames);
             var evaluator = new ConditionEvaluator(expressionAttributeValues);
             items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
         }
@@ -175,8 +174,7 @@ public class QueryScanOperations
         // FilterExpression
         if (root.TryGetProperty("FilterExpression", out var fe))
         {
-            var parser = new ConditionExpressionParser(fe.GetString()!, expressionAttributeNames);
-            var ast = parser.Parse();
+            var ast = DynamoDbExpressionParser.ParseCondition(fe.GetString()!, expressionAttributeNames);
             var evaluator = new ConditionEvaluator(expressionAttributeValues);
             items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
         }
@@ -204,8 +202,7 @@ public class QueryScanOperations
         string hashKeyName,
         string? rangeKeyName)
     {
-        var parser = new ConditionExpressionParser(expression, expressionAttributeNames);
-        var ast = parser.Parse();
+        var ast = DynamoDbExpressionParser.ParseCondition(expression, expressionAttributeNames);
 
         AttributeValue? pkValue = null;
         SortKeyCondition? skCondition = null;
