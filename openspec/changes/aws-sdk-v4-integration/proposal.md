@@ -1,4 +1,7 @@
-# AWS SDK v4 Integration Tests Proposal
+# AWS SDK v4 Integration Tests
+
+## Spec
+`specs/aws-sdk-v4-integration`
 
 ## Problem
 The mock DynamoDB server has comprehensive unit tests for its expression engine but lacks end-to-end integration tests that use the real AWS SDK for .NET v4 (`AWSSDK.DynamoDBv2` v4.x). Without these tests, there is no verification that the server's wire protocol implementation is compatible with the actual SDK client, including its JSON serialization, header conventions, and URI canonicalization behaviour.
