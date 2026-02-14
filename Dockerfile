@@ -1,10 +1,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
 WORKDIR /src
 
-# Install JRE required by Antlr4BuildTasks to generate parsers from .g4 grammars
-RUN apt-get update && apt-get install -y --no-install-recommends default-jre-headless \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY MockDynamoDB.slnx .
 COPY src/MockDynamoDB.Core/MockDynamoDB.Core.csproj src/MockDynamoDB.Core/
 COPY src/MockDynamoDB.Server/MockDynamoDB.Server.csproj src/MockDynamoDB.Server/
