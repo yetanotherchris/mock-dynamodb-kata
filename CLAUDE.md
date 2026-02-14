@@ -82,6 +82,43 @@ Local Secondary Indexes are supported on Query.
 - Table names include `Guid.NewGuid()` for parallel test isolation
 - Classes with seeded data implement `IAsyncLifetime` for setup/teardown
 
+## OpenSpec Workflow
+
+This project uses [OpenSpec](https://github.com/Fission-AI/OpenSpec) for spec-driven development. Requirements live in `openspec/specs/`, and proposed changes live in `openspec/changes/`.
+
+### Directory Layout
+
+```
+openspec/
+  specs/                          # Requirements (the "what")
+    table-operations/spec.md
+    item-crud/spec.md
+    ...
+  changes/                        # Change proposals (the "how")
+    initial-implementation/       # One folder per logical unit of work
+      proposal.md
+      design.md
+      tasks.md
+    archive/                      # Completed changes (after /opsx:archive)
+```
+
+### Creating a Change
+
+When implementing a new feature or modifying behaviour:
+
+1. Create a change folder under `openspec/changes/<change-name>/`
+2. **`proposal.md`** — Must include a `## Spec` section referencing the spec(s) it implements (e.g. `` `specs/aws-sdk-v4-integration` ``). Describes the problem, solution, scope, and out-of-scope.
+3. **`design.md`** — Architecture decisions and technical approach.
+4. **`tasks.md`** — Checklist of implementation tasks. Each task should reference its spec scenario where applicable (e.g. `— *Scenario: Create a hash-key table*`). Mark tasks `[x]` as they are completed.
+
+### Key Conventions
+
+- **Specs are requirements, changes are work.** Never edit a spec file directly when implementing — work through a change.
+- **One change = one logical unit of work.** Don't combine unrelated features in a single change.
+- **Reference the spec.** Every change proposal must have a `## Spec` section linking to the spec(s) it covers.
+- **Trace tasks to scenarios.** Tasks in `tasks.md` should map back to specific spec scenarios for traceability.
+- **Archive when done.** Completed changes move to `openspec/changes/archive/` after verification.
+
 ## Not Supported
 
 Global Secondary Indexes, DynamoDB Streams, TTL, provisioned capacity simulation, PartiQL, backup/restore, global tables.

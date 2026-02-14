@@ -24,7 +24,12 @@ CreateTable, DeleteTable, DescribeTable, ListTables, PutItem, GetItem, DeleteIte
 
 Local Secondary Indexes are supported on Query.
 
+## Spec-Driven Development
+
+This project uses [OpenSpec](https://github.com/Fission-AI/OpenSpec) to manage requirements and track changes. Specifications in `openspec/specs/` define what the system should do. When a feature is planned, a change folder is created under `openspec/changes/` containing a proposal, design, and task checklist that reference the relevant specs. Once implemented and verified, changes are archived. This keeps requirements, design decisions, and implementation history in sync without heavyweight process.
+
 ## References
 
 - [AWS API Models](https://github.com/aws/aws-models) - Smithy model definitions for AWS services including DynamoDB
 - [Smithy](https://smithy.io/) - Interface definition language used by AWS
+- [OpenSpec](https://github.com/Fission-AI/OpenSpec) - Spec-driven development framework for AI coding assistants
