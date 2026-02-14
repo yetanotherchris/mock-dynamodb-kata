@@ -15,6 +15,7 @@
     <Antlr4 Include="Expressions/Grammar/*.g4">
       <Listener>false</Listener>
       <Visitor>true</Visitor>
+      <Package>MockDynamoDB.Core.Expressions.Grammar</Package>
     </Antlr4>
   </ItemGroup>
 

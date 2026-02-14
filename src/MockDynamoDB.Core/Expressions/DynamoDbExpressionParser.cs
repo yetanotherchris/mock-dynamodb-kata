@@ -50,6 +50,7 @@ public static class DynamoDbExpressionParser
         public static readonly ThrowingErrorListener Instance = new();
 
         public override void SyntaxError(
+            TextWriter output,
             IRecognizer recognizer,
             IToken offendingSymbol,
             int line,
@@ -62,6 +63,7 @@ public static class DynamoDbExpressionParser
         }
 
         public void SyntaxError(
+            TextWriter output,
             IRecognizer recognizer,
             int offendingSymbol,
             int line,
