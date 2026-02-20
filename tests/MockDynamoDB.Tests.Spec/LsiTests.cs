@@ -169,7 +169,7 @@ public class LsiTests(MockDynamoDbFixture fixture)
             }
         });
 
-        await Assert.That(result.Items).HasCount().EqualTo(1);
+        await Assert.That(result.Items).Count().IsEqualTo(1);
         var item = result.Items[0];
         await Assert.That(item["pk"].S).IsEqualTo("user1");
         await Assert.That(item["sk"].S).IsEqualTo("item#001");

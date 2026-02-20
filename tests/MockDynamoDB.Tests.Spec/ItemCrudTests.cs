@@ -170,10 +170,10 @@ public class ItemCrudTests(MockDynamoDbFixture fixture)
         await Assert.That(response.Item["numberAttr"].N).IsEqualTo("42");
         await Assert.That(response.Item["boolAttr"].BOOL).IsTrue();
         await Assert.That(response.Item["nullAttr"].NULL).IsTrue();
-        await Assert.That(response.Item["listAttr"].L).HasCount().EqualTo(2);
+        await Assert.That(response.Item["listAttr"].L).Count().IsEqualTo(2);
         await Assert.That(response.Item["mapAttr"].M["nested"].S).IsEqualTo("value");
-        await Assert.That(response.Item["stringSet"].SS).HasCount().EqualTo(3);
-        await Assert.That(response.Item["numberSet"].NS).HasCount().EqualTo(3);
+        await Assert.That(response.Item["stringSet"].SS).Count().IsEqualTo(3);
+        await Assert.That(response.Item["numberSet"].NS).Count().IsEqualTo(3);
     }
 
     [Test]

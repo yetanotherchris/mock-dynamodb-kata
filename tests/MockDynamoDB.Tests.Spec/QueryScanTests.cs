@@ -146,7 +146,7 @@ public class QueryScanTests(MockDynamoDbFixture fixture)
             Limit = 2
         });
 
-        await Assert.That(result.Items).HasCount().EqualTo(2);
+        await Assert.That(result.Items).Count().IsEqualTo(2);
         await Assert.That(result.LastEvaluatedKey).IsNotNull();
     }
 
@@ -183,7 +183,7 @@ public class QueryScanTests(MockDynamoDbFixture fixture)
             Limit = 3
         });
 
-        await Assert.That(result.Items).HasCount().EqualTo(3);
+        await Assert.That(result.Items).Count().IsEqualTo(3);
         await Assert.That(result.LastEvaluatedKey).IsNotNull();
     }
 
@@ -206,6 +206,6 @@ public class QueryScanTests(MockDynamoDbFixture fixture)
             lastKey = result.LastEvaluatedKey;
         } while (lastKey != null && lastKey.Count > 0);
 
-        await Assert.That(allItems).HasCount().EqualTo(6);
+        await Assert.That(allItems).Count().IsEqualTo(6);
     }
 }

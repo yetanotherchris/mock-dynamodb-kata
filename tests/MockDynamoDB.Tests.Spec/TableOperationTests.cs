@@ -48,7 +48,7 @@ public class TableOperationTests(MockDynamoDbFixture fixture)
         });
 
         await Assert.That(response.TableDescription.TableStatus.Value).IsEqualTo("ACTIVE");
-        await Assert.That(response.TableDescription.KeySchema).HasCount().EqualTo(2);
+        await Assert.That(response.TableDescription.KeySchema).Count().IsEqualTo(2);
 
         await _client.DeleteTableAsync(tableName);
     }

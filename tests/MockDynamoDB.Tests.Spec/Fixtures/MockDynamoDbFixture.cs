@@ -2,6 +2,7 @@ using Amazon;
 using Amazon.DynamoDBv2;
 using Amazon.Runtime;
 using Microsoft.AspNetCore.Mvc.Testing;
+using TUnit.Core.Interfaces;
 
 namespace MockDynamoDB.Tests.Spec.Fixtures;
 

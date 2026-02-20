@@ -16,7 +16,7 @@ public class ConditionExpressionParserTests
 
         await Assert.That(comp.Left).IsTypeOf<PathNode>();
         var left = (PathNode)comp.Left;
-        await Assert.That(left.Path.Elements).HasCount().EqualTo(1);
+        await Assert.That(left.Path.Elements).Count().IsEqualTo(1);
         await Assert.That(((AttributeElement)left.Path.Elements[0]).Name).IsEqualTo("price");
 
         await Assert.That(comp.Right).IsTypeOf<ValuePlaceholderNode>();
@@ -128,7 +128,7 @@ public class ConditionExpressionParserTests
         await Assert.That(result).IsTypeOf<InNode>();
         var inNode = (InNode)result;
         await Assert.That(inNode.Value).IsTypeOf<PathNode>();
-        await Assert.That(inNode.List).HasCount().EqualTo(3);
+        await Assert.That(inNode.List).Count().IsEqualTo(3);
         foreach (var item in inNode.List)
         {
             await Assert.That(item).IsTypeOf<ValuePlaceholderNode>();
@@ -159,7 +159,7 @@ public class ConditionExpressionParserTests
         await Assert.That(result).IsTypeOf<FunctionNode>();
         var func = (FunctionNode)result;
         await Assert.That(func.FunctionName).IsEqualTo("attribute_exists");
-        await Assert.That(func.Arguments).HasCount().EqualTo(1);
+        await Assert.That(func.Arguments).Count().IsEqualTo(1);
         await Assert.That(func.Arguments[0]).IsTypeOf<PathNode>();
     }
 
@@ -181,7 +181,7 @@ public class ConditionExpressionParserTests
         await Assert.That(result).IsTypeOf<FunctionNode>();
         var func = (FunctionNode)result;
         await Assert.That(func.FunctionName).IsEqualTo("attribute_type");
-        await Assert.That(func.Arguments).HasCount().EqualTo(2);
+        await Assert.That(func.Arguments).Count().IsEqualTo(2);
     }
 
     [Test]
@@ -192,7 +192,7 @@ public class ConditionExpressionParserTests
         await Assert.That(result).IsTypeOf<FunctionNode>();
         var func = (FunctionNode)result;
         await Assert.That(func.FunctionName).IsEqualTo("begins_with");
-        await Assert.That(func.Arguments).HasCount().EqualTo(2);
+        await Assert.That(func.Arguments).Count().IsEqualTo(2);
     }
 
     [Test]
@@ -226,7 +226,7 @@ public class ConditionExpressionParserTests
         var comp = (ComparisonNode)result;
         await Assert.That(comp.Left).IsTypeOf<PathNode>();
         var path = (PathNode)comp.Left;
-        await Assert.That(path.Path.Elements).HasCount().EqualTo(3);
+        await Assert.That(path.Path.Elements).Count().IsEqualTo(3);
         await Assert.That(((AttributeElement)path.Path.Elements[0]).Name).IsEqualTo("user");
         await Assert.That(((AttributeElement)path.Path.Elements[1]).Name).IsEqualTo("address");
         await Assert.That(((AttributeElement)path.Path.Elements[2]).Name).IsEqualTo("city");
@@ -241,7 +241,7 @@ public class ConditionExpressionParserTests
         var comp = (ComparisonNode)result;
         await Assert.That(comp.Left).IsTypeOf<PathNode>();
         var path = (PathNode)comp.Left;
-        await Assert.That(path.Path.Elements).HasCount().EqualTo(3);
+        await Assert.That(path.Path.Elements).Count().IsEqualTo(3);
         await Assert.That(((AttributeElement)path.Path.Elements[0]).Name).IsEqualTo("items");
         await Assert.That(((IndexElement)path.Path.Elements[1]).Index).IsEqualTo(0);
         await Assert.That(((AttributeElement)path.Path.Elements[2]).Name).IsEqualTo("name");
@@ -276,7 +276,7 @@ public class ConditionExpressionParserTests
         var comp = (ComparisonNode)result;
         await Assert.That(comp.Left).IsTypeOf<PathNode>();
         var path = (PathNode)comp.Left;
-        await Assert.That(path.Path.Elements).HasCount().EqualTo(2);
+        await Assert.That(path.Path.Elements).Count().IsEqualTo(2);
         await Assert.That(((AttributeElement)path.Path.Elements[0]).Name).IsEqualTo("user");
         await Assert.That(((AttributeElement)path.Path.Elements[1]).Name).IsEqualTo("name");
     }

@@ -72,7 +72,7 @@ public class BatchTransactionTests(MockDynamoDbFixture fixture)
             }
         });
 
-        await Assert.That(result.Responses[_tableName]).HasCount().EqualTo(2);
+        await Assert.That(result.Responses[_tableName]).Count().IsEqualTo(2);
         await Assert.That(result.UnprocessedKeys).IsEmpty();
     }
 
@@ -171,7 +171,7 @@ public class BatchTransactionTests(MockDynamoDbFixture fixture)
             ]
         });
 
-        await Assert.That(result.Responses).HasCount().EqualTo(3);
+        await Assert.That(result.Responses).Count().IsEqualTo(3);
         await Assert.That(result.Responses[0].Item["val"].S).IsEqualTo("a");
         await Assert.That(result.Responses[1].Item["val"].S).IsEqualTo("b");
         await Assert.That(result.Responses[2].Item == null || result.Responses[2].Item.Count == 0).IsTrue();
