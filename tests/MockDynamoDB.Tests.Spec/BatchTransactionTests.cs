@@ -47,7 +47,7 @@ public class BatchTransactionTests(MockDynamoDbFixture fixture)
         await Assert.That(result.UnprocessedItems).IsEmpty();
 
         var scan = await _client.ScanAsync(new ScanRequest { TableName = _tableName });
-        await Assert.That(scan.Count).IsGreaterThanOrEqualTo(3);
+        await Assert.That(scan.Items.Count).IsGreaterThanOrEqualTo(3);
     }
 
     [Test]
