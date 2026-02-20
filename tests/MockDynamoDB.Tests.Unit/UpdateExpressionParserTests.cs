@@ -5,189 +5,212 @@ namespace MockDynamoDB.Tests.Unit;
 
 public class UpdateExpressionParserTests
 {
-    [Fact]
-    public void ParseUpdate_SetSimpleValue_ReturnsSetAction()
+    [Test]
+    public async Task ParseUpdate_SetSimpleValue_ReturnsSetAction()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET #s = :val",
             new Dictionary<string, string> { { "#s", "status" } });
 
-        var action = Assert.Single(actions);
-        Assert.Equal("SET", action.Type);
-        Assert.Equal("status", ((AttributeElement)action.Path.Elements[0]).Name);
-        Assert.IsType<ValuePlaceholderNode>(action.Value);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Type).IsEqualTo("SET");
+        await Assert.That(((AttributeElement)action.Path.Elements[0]).Name).IsEqualTo("status");
+        await Assert.That(action.Value).IsTypeOf<ValuePlaceholderNode>();
     }
 
-    [Fact]
-    public void ParseUpdate_SetWithArithmetic_ReturnsArithmeticNode()
+    [Test]
+    public async Task ParseUpdate_SetWithArithmetic_ReturnsArithmeticNode()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET count = count + :inc");
 
-        var action = Assert.Single(actions);
-        Assert.Equal("SET", action.Type);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Type).IsEqualTo("SET");
 
-        var arith = Assert.IsType<ArithmeticNode>(action.Value);
-        Assert.Equal("+", arith.Operator);
-        Assert.IsType<PathNode>(arith.Left);
-        Assert.IsType<ValuePlaceholderNode>(arith.Right);
+        await Assert.That(action.Value).IsTypeOf<ArithmeticNode>();
+        var arith = (ArithmeticNode)action.Value!;
+        await Assert.That(arith.Operator).IsEqualTo("+");
+        await Assert.That(arith.Left).IsTypeOf<PathNode>();
+        await Assert.That(arith.Right).IsTypeOf<ValuePlaceholderNode>();
     }
 
-    [Fact]
-    public void ParseUpdate_SetWithSubtraction_ReturnsArithmeticNode()
+    [Test]
+    public async Task ParseUpdate_SetWithSubtraction_ReturnsArithmeticNode()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET stock = stock - :dec");
 
-        var action = Assert.Single(actions);
-        var arith = Assert.IsType<ArithmeticNode>(action.Value);
-        Assert.Equal("-", arith.Operator);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Value).IsTypeOf<ArithmeticNode>();
+        var arith = (ArithmeticNode)action.Value!;
+        await Assert.That(arith.Operator).IsEqualTo("-");
     }
 
-    [Fact]
-    public void ParseUpdate_SetWithIfNotExists_ReturnsFunctionNode()
+    [Test]
+    public async Task ParseUpdate_SetWithIfNotExists_ReturnsFunctionNode()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET val = if_not_exists(val, :default)");
 
-        var action = Assert.Single(actions);
-        var func = Assert.IsType<FunctionNode>(action.Value);
-        Assert.Equal("if_not_exists", func.FunctionName);
-        Assert.Equal(2, func.Arguments.Count);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Value).IsTypeOf<FunctionNode>();
+        var func = (FunctionNode)action.Value!;
+        await Assert.That(func.FunctionName).IsEqualTo("if_not_exists");
+        await Assert.That(func.Arguments).Count().IsEqualTo(2);
     }
 
-    [Fact]
-    public void ParseUpdate_SetWithListAppend_ReturnsFunctionNode()
+    [Test]
+    public async Task ParseUpdate_SetWithListAppend_ReturnsFunctionNode()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET items = list_append(items, :newItems)");
 
-        var action = Assert.Single(actions);
-        var func = Assert.IsType<FunctionNode>(action.Value);
-        Assert.Equal("list_append", func.FunctionName);
-        Assert.Equal(2, func.Arguments.Count);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Value).IsTypeOf<FunctionNode>();
+        var func = (FunctionNode)action.Value!;
+        await Assert.That(func.FunctionName).IsEqualTo("list_append");
+        await Assert.That(func.Arguments).Count().IsEqualTo(2);
     }
 
-    [Fact]
-    public void ParseUpdate_RemoveSinglePath_ReturnsRemoveAction()
+    [Test]
+    public async Task ParseUpdate_RemoveSinglePath_ReturnsRemoveAction()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("REMOVE attr1");
 
-        var action = Assert.Single(actions);
-        Assert.Equal("REMOVE", action.Type);
-        Assert.Equal("attr1", ((AttributeElement)action.Path.Elements[0]).Name);
-        Assert.Null(action.Value);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Type).IsEqualTo("REMOVE");
+        await Assert.That(((AttributeElement)action.Path.Elements[0]).Name).IsEqualTo("attr1");
+        await Assert.That(action.Value).IsNull();
     }
 
-    [Fact]
-    public void ParseUpdate_RemoveMultiplePaths_ReturnsMultipleActions()
+    [Test]
+    public async Task ParseUpdate_RemoveMultiplePaths_ReturnsMultipleActions()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("REMOVE attr1, attr2.nested");
 
-        Assert.Equal(2, actions.Count);
-        Assert.All(actions, a => Assert.Equal("REMOVE", a.Type));
+        await Assert.That(actions).Count().IsEqualTo(2);
+        foreach (var a in actions)
+        {
+            await Assert.That(a.Type).IsEqualTo("REMOVE");
+        }
 
-        Assert.Equal("attr1", ((AttributeElement)actions[0].Path.Elements[0]).Name);
-        Assert.Equal("attr2", ((AttributeElement)actions[1].Path.Elements[0]).Name);
-        Assert.Equal("nested", ((AttributeElement)actions[1].Path.Elements[1]).Name);
+        await Assert.That(((AttributeElement)actions[0].Path.Elements[0]).Name).IsEqualTo("attr1");
+        await Assert.That(((AttributeElement)actions[1].Path.Elements[0]).Name).IsEqualTo("attr2");
+        await Assert.That(((AttributeElement)actions[1].Path.Elements[1]).Name).IsEqualTo("nested");
     }
 
-    [Fact]
-    public void ParseUpdate_AddAction_ReturnsAddAction()
+    [Test]
+    public async Task ParseUpdate_AddAction_ReturnsAddAction()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("ADD counter :inc");
 
-        var action = Assert.Single(actions);
-        Assert.Equal("ADD", action.Type);
-        Assert.Equal("counter", ((AttributeElement)action.Path.Elements[0]).Name);
-        Assert.IsType<ValuePlaceholderNode>(action.Value);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Type).IsEqualTo("ADD");
+        await Assert.That(((AttributeElement)action.Path.Elements[0]).Name).IsEqualTo("counter");
+        await Assert.That(action.Value).IsTypeOf<ValuePlaceholderNode>();
     }
 
-    [Fact]
-    public void ParseUpdate_DeleteAction_ReturnsDeleteAction()
+    [Test]
+    public async Task ParseUpdate_DeleteAction_ReturnsDeleteAction()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("DELETE tags :removals");
 
-        var action = Assert.Single(actions);
-        Assert.Equal("DELETE", action.Type);
-        Assert.Equal("tags", ((AttributeElement)action.Path.Elements[0]).Name);
-        Assert.IsType<ValuePlaceholderNode>(action.Value);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Type).IsEqualTo("DELETE");
+        await Assert.That(((AttributeElement)action.Path.Elements[0]).Name).IsEqualTo("tags");
+        await Assert.That(action.Value).IsTypeOf<ValuePlaceholderNode>();
     }
 
-    [Fact]
-    public void ParseUpdate_CombinedClauses_ReturnsAllActions()
+    [Test]
+    public async Task ParseUpdate_CombinedClauses_ReturnsAllActions()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET a = :v1 REMOVE b ADD c :v2");
 
-        Assert.Equal(3, actions.Count);
-        Assert.Equal("SET", actions[0].Type);
-        Assert.Equal("REMOVE", actions[1].Type);
-        Assert.Equal("ADD", actions[2].Type);
+        await Assert.That(actions).Count().IsEqualTo(3);
+        await Assert.That(actions[0].Type).IsEqualTo("SET");
+        await Assert.That(actions[1].Type).IsEqualTo("REMOVE");
+        await Assert.That(actions[2].Type).IsEqualTo("ADD");
     }
 
-    [Fact]
-    public void ParseUpdate_AddAndDeleteCombined_ReturnsAllActions()
+    [Test]
+    public async Task ParseUpdate_AddAndDeleteCombined_ReturnsAllActions()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("ADD counter :inc DELETE tags :removals");
 
-        Assert.Equal(2, actions.Count);
-        Assert.Equal("ADD", actions[0].Type);
-        Assert.Equal("DELETE", actions[1].Type);
+        await Assert.That(actions).Count().IsEqualTo(2);
+        await Assert.That(actions[0].Type).IsEqualTo("ADD");
+        await Assert.That(actions[1].Type).IsEqualTo("DELETE");
     }
 
-    [Fact]
-    public void ParseUpdate_MultipleSetActions_ReturnsAll()
+    [Test]
+    public async Task ParseUpdate_MultipleSetActions_ReturnsAll()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET a = :v1, b = :v2, c = :v3");
 
-        Assert.Equal(3, actions.Count);
-        Assert.All(actions, a => Assert.Equal("SET", a.Type));
+        await Assert.That(actions).Count().IsEqualTo(3);
+        foreach (var a in actions)
+        {
+            await Assert.That(a.Type).IsEqualTo("SET");
+        }
     }
 
-    [Fact]
-    public void ParseUpdate_SetWithDocumentPath_ResolvesPath()
+    [Test]
+    public async Task ParseUpdate_SetWithDocumentPath_ResolvesPath()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET user.name = :name");
 
-        var action = Assert.Single(actions);
-        Assert.Equal(2, action.Path.Elements.Count);
-        Assert.Equal("user", ((AttributeElement)action.Path.Elements[0]).Name);
-        Assert.Equal("name", ((AttributeElement)action.Path.Elements[1]).Name);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Path.Elements).Count().IsEqualTo(2);
+        await Assert.That(((AttributeElement)action.Path.Elements[0]).Name).IsEqualTo("user");
+        await Assert.That(((AttributeElement)action.Path.Elements[1]).Name).IsEqualTo("name");
     }
 
-    [Fact]
-    public void ParseUpdate_SetWithListIndex_ResolvesPath()
+    [Test]
+    public async Task ParseUpdate_SetWithListIndex_ResolvesPath()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET items[0].name = :name");
 
-        var action = Assert.Single(actions);
-        Assert.Equal(3, action.Path.Elements.Count);
-        Assert.Equal("items", ((AttributeElement)action.Path.Elements[0]).Name);
-        Assert.Equal(0, ((IndexElement)action.Path.Elements[1]).Index);
-        Assert.Equal("name", ((AttributeElement)action.Path.Elements[2]).Name);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Path.Elements).Count().IsEqualTo(3);
+        await Assert.That(((AttributeElement)action.Path.Elements[0]).Name).IsEqualTo("items");
+        await Assert.That(((IndexElement)action.Path.Elements[1]).Index).IsEqualTo(0);
+        await Assert.That(((AttributeElement)action.Path.Elements[2]).Name).IsEqualTo("name");
     }
 
-    [Fact]
-    public void ParseUpdate_ExpressionAttributeNames_ResolvesPlaceholders()
+    [Test]
+    public async Task ParseUpdate_ExpressionAttributeNames_ResolvesPlaceholders()
     {
         var names = new Dictionary<string, string> { { "#s", "status" }, { "#n", "name" } };
 
         var actions = DynamoDbExpressionParser.ParseUpdate("SET #s = :val, #n = :name", names);
 
-        Assert.Equal(2, actions.Count);
-        Assert.Equal("status", ((AttributeElement)actions[0].Path.Elements[0]).Name);
-        Assert.Equal("name", ((AttributeElement)actions[1].Path.Elements[0]).Name);
+        await Assert.That(actions).Count().IsEqualTo(2);
+        await Assert.That(((AttributeElement)actions[0].Path.Elements[0]).Name).IsEqualTo("status");
+        await Assert.That(((AttributeElement)actions[1].Path.Elements[0]).Name).IsEqualTo("name");
     }
 
-    [Fact]
-    public void ParseUpdate_MalformedExpression_ThrowsValidationException()
+    [Test]
+    public async Task ParseUpdate_MalformedExpression_ThrowsValidationException()
     {
-        Assert.Throws<ValidationException>(() =>
-            DynamoDbExpressionParser.ParseUpdate("INVALID expression"));
+        await Assert.That(() =>
+            DynamoDbExpressionParser.ParseUpdate("INVALID expression"))
+            .ThrowsExactly<ValidationException>();
     }
 
-    [Fact]
-    public void ParseUpdate_SetWithPathAsValue_ReturnsPathNode()
+    [Test]
+    public async Task ParseUpdate_SetWithPathAsValue_ReturnsPathNode()
     {
         var actions = DynamoDbExpressionParser.ParseUpdate("SET backup = original");
 
-        var action = Assert.Single(actions);
-        var pathValue = Assert.IsType<PathNode>(action.Value);
-        Assert.Equal("original", ((AttributeElement)pathValue.Path.Elements[0]).Name);
+        await Assert.That(actions).Count().IsEqualTo(1);
+        var action = actions[0];
+        await Assert.That(action.Value).IsTypeOf<PathNode>();
+        var pathValue = (PathNode)action.Value!;
+        await Assert.That(((AttributeElement)pathValue.Path.Elements[0]).Name).IsEqualTo("original");
     }
 }

@@ -5,232 +5,264 @@ namespace MockDynamoDB.Tests.Unit;
 
 public class ConditionExpressionParserTests
 {
-    [Fact]
-    public void ParseCondition_SimpleComparison_ReturnsComparisonNode()
+    [Test]
+    public async Task ParseCondition_SimpleComparison_ReturnsComparisonNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("price > :minPrice");
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        Assert.Equal(">", comp.Operator);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Operator).IsEqualTo(">");
 
-        var left = Assert.IsType<PathNode>(comp.Left);
-        Assert.Single(left.Path.Elements);
-        Assert.Equal("price", ((AttributeElement)left.Path.Elements[0]).Name);
+        await Assert.That(comp.Left).IsTypeOf<PathNode>();
+        var left = (PathNode)comp.Left;
+        await Assert.That(left.Path.Elements).Count().IsEqualTo(1);
+        await Assert.That(((AttributeElement)left.Path.Elements[0]).Name).IsEqualTo("price");
 
-        var right = Assert.IsType<ValuePlaceholderNode>(comp.Right);
-        Assert.Equal(":minPrice", right.Placeholder);
+        await Assert.That(comp.Right).IsTypeOf<ValuePlaceholderNode>();
+        var right = (ValuePlaceholderNode)comp.Right;
+        await Assert.That(right.Placeholder).IsEqualTo(":minPrice");
     }
 
-    [Fact]
-    public void ParseCondition_Equals_ReturnsComparisonNode()
+    [Test]
+    public async Task ParseCondition_Equals_ReturnsComparisonNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("status = :val");
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        Assert.Equal("=", comp.Operator);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Operator).IsEqualTo("=");
     }
 
-    [Fact]
-    public void ParseCondition_NotEquals_ReturnsComparisonNode()
+    [Test]
+    public async Task ParseCondition_NotEquals_ReturnsComparisonNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("status <> :val");
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        Assert.Equal("<>", comp.Operator);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Operator).IsEqualTo("<>");
     }
 
-    [Fact]
-    public void ParseCondition_LessThan_ReturnsComparisonNode()
+    [Test]
+    public async Task ParseCondition_LessThan_ReturnsComparisonNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("age < :maxAge");
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        Assert.Equal("<", comp.Operator);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Operator).IsEqualTo("<");
     }
 
-    [Fact]
-    public void ParseCondition_LessThanOrEqual_ReturnsComparisonNode()
+    [Test]
+    public async Task ParseCondition_LessThanOrEqual_ReturnsComparisonNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("age <= :maxAge");
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        Assert.Equal("<=", comp.Operator);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Operator).IsEqualTo("<=");
     }
 
-    [Fact]
-    public void ParseCondition_GreaterThanOrEqual_ReturnsComparisonNode()
+    [Test]
+    public async Task ParseCondition_GreaterThanOrEqual_ReturnsComparisonNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("age >= :minAge");
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        Assert.Equal(">=", comp.Operator);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Operator).IsEqualTo(">=");
     }
 
-    [Fact]
-    public void ParseCondition_AndOperator_ReturnsLogicalNode()
+    [Test]
+    public async Task ParseCondition_AndOperator_ReturnsLogicalNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("price > :min AND status = :active");
 
-        var logical = Assert.IsType<LogicalNode>(result);
-        Assert.Equal("AND", logical.Operator);
-        Assert.IsType<ComparisonNode>(logical.Left);
-        Assert.IsType<ComparisonNode>(logical.Right);
+        await Assert.That(result).IsTypeOf<LogicalNode>();
+        var logical = (LogicalNode)result;
+        await Assert.That(logical.Operator).IsEqualTo("AND");
+        await Assert.That(logical.Left).IsTypeOf<ComparisonNode>();
+        await Assert.That(logical.Right).IsTypeOf<ComparisonNode>();
     }
 
-    [Fact]
-    public void ParseCondition_OrOperator_ReturnsLogicalNode()
+    [Test]
+    public async Task ParseCondition_OrOperator_ReturnsLogicalNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("price > :min OR status = :active");
 
-        var logical = Assert.IsType<LogicalNode>(result);
-        Assert.Equal("OR", logical.Operator);
+        await Assert.That(result).IsTypeOf<LogicalNode>();
+        var logical = (LogicalNode)result;
+        await Assert.That(logical.Operator).IsEqualTo("OR");
     }
 
-    [Fact]
-    public void ParseCondition_NotOperator_ReturnsNotNode()
+    [Test]
+    public async Task ParseCondition_NotOperator_ReturnsNotNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("NOT contains(tags, :val)");
 
-        var notNode = Assert.IsType<NotNode>(result);
-        var func = Assert.IsType<FunctionNode>(notNode.Operand);
-        Assert.Equal("contains", func.FunctionName);
+        await Assert.That(result).IsTypeOf<NotNode>();
+        var notNode = (NotNode)result;
+        await Assert.That(notNode.Operand).IsTypeOf<FunctionNode>();
+        var func = (FunctionNode)notNode.Operand;
+        await Assert.That(func.FunctionName).IsEqualTo("contains");
     }
 
-    [Fact]
-    public void ParseCondition_Between_ReturnsBetweenNode()
+    [Test]
+    public async Task ParseCondition_Between_ReturnsBetweenNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("age BETWEEN :low AND :high");
 
-        var between = Assert.IsType<BetweenNode>(result);
-        Assert.IsType<PathNode>(between.Value);
-        Assert.IsType<ValuePlaceholderNode>(between.Low);
-        Assert.IsType<ValuePlaceholderNode>(between.High);
+        await Assert.That(result).IsTypeOf<BetweenNode>();
+        var between = (BetweenNode)result;
+        await Assert.That(between.Value).IsTypeOf<PathNode>();
+        await Assert.That(between.Low).IsTypeOf<ValuePlaceholderNode>();
+        await Assert.That(between.High).IsTypeOf<ValuePlaceholderNode>();
     }
 
-    [Fact]
-    public void ParseCondition_In_ReturnsInNode()
+    [Test]
+    public async Task ParseCondition_In_ReturnsInNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("status IN (:s1, :s2, :s3)");
 
-        var inNode = Assert.IsType<InNode>(result);
-        Assert.IsType<PathNode>(inNode.Value);
-        Assert.Equal(3, inNode.List.Count);
-        Assert.All(inNode.List, item => Assert.IsType<ValuePlaceholderNode>(item));
+        await Assert.That(result).IsTypeOf<InNode>();
+        var inNode = (InNode)result;
+        await Assert.That(inNode.Value).IsTypeOf<PathNode>();
+        await Assert.That(inNode.List).Count().IsEqualTo(3);
+        foreach (var item in inNode.List)
+        {
+            await Assert.That(item).IsTypeOf<ValuePlaceholderNode>();
+        }
     }
 
-    [Fact]
-    public void ParseCondition_ParenthesizedGrouping_RespectsParentheses()
+    [Test]
+    public async Task ParseCondition_ParenthesizedGrouping_RespectsParentheses()
     {
         var result = DynamoDbExpressionParser.ParseCondition("(a = :v1 OR b = :v2) AND c = :v3");
 
-        var and = Assert.IsType<LogicalNode>(result);
-        Assert.Equal("AND", and.Operator);
+        await Assert.That(result).IsTypeOf<LogicalNode>();
+        var and = (LogicalNode)result;
+        await Assert.That(and.Operator).IsEqualTo("AND");
 
-        var or = Assert.IsType<LogicalNode>(and.Left);
-        Assert.Equal("OR", or.Operator);
+        await Assert.That(and.Left).IsTypeOf<LogicalNode>();
+        var or = (LogicalNode)and.Left;
+        await Assert.That(or.Operator).IsEqualTo("OR");
 
-        Assert.IsType<ComparisonNode>(and.Right);
+        await Assert.That(and.Right).IsTypeOf<ComparisonNode>();
     }
 
-    [Fact]
-    public void ParseCondition_AttributeExists_ReturnsFunctionNode()
+    [Test]
+    public async Task ParseCondition_AttributeExists_ReturnsFunctionNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("attribute_exists(email)");
 
-        var func = Assert.IsType<FunctionNode>(result);
-        Assert.Equal("attribute_exists", func.FunctionName);
-        Assert.Single(func.Arguments);
-        Assert.IsType<PathNode>(func.Arguments[0]);
+        await Assert.That(result).IsTypeOf<FunctionNode>();
+        var func = (FunctionNode)result;
+        await Assert.That(func.FunctionName).IsEqualTo("attribute_exists");
+        await Assert.That(func.Arguments).Count().IsEqualTo(1);
+        await Assert.That(func.Arguments[0]).IsTypeOf<PathNode>();
     }
 
-    [Fact]
-    public void ParseCondition_AttributeNotExists_ReturnsFunctionNode()
+    [Test]
+    public async Task ParseCondition_AttributeNotExists_ReturnsFunctionNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("attribute_not_exists(deleted)");
 
-        var func = Assert.IsType<FunctionNode>(result);
-        Assert.Equal("attribute_not_exists", func.FunctionName);
+        await Assert.That(result).IsTypeOf<FunctionNode>();
+        var func = (FunctionNode)result;
+        await Assert.That(func.FunctionName).IsEqualTo("attribute_not_exists");
     }
 
-    [Fact]
-    public void ParseCondition_AttributeType_ReturnsFunctionNode()
+    [Test]
+    public async Task ParseCondition_AttributeType_ReturnsFunctionNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("attribute_type(field, :type)");
 
-        var func = Assert.IsType<FunctionNode>(result);
-        Assert.Equal("attribute_type", func.FunctionName);
-        Assert.Equal(2, func.Arguments.Count);
+        await Assert.That(result).IsTypeOf<FunctionNode>();
+        var func = (FunctionNode)result;
+        await Assert.That(func.FunctionName).IsEqualTo("attribute_type");
+        await Assert.That(func.Arguments).Count().IsEqualTo(2);
     }
 
-    [Fact]
-    public void ParseCondition_BeginsWith_ReturnsFunctionNode()
+    [Test]
+    public async Task ParseCondition_BeginsWith_ReturnsFunctionNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("begins_with(sk, :prefix)");
 
-        var func = Assert.IsType<FunctionNode>(result);
-        Assert.Equal("begins_with", func.FunctionName);
-        Assert.Equal(2, func.Arguments.Count);
+        await Assert.That(result).IsTypeOf<FunctionNode>();
+        var func = (FunctionNode)result;
+        await Assert.That(func.FunctionName).IsEqualTo("begins_with");
+        await Assert.That(func.Arguments).Count().IsEqualTo(2);
     }
 
-    [Fact]
-    public void ParseCondition_Contains_ReturnsFunctionNode()
+    [Test]
+    public async Task ParseCondition_Contains_ReturnsFunctionNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("contains(description, :word)");
 
-        var func = Assert.IsType<FunctionNode>(result);
-        Assert.Equal("contains", func.FunctionName);
+        await Assert.That(result).IsTypeOf<FunctionNode>();
+        var func = (FunctionNode)result;
+        await Assert.That(func.FunctionName).IsEqualTo("contains");
     }
 
-    [Fact]
-    public void ParseCondition_SizeInComparison_ReturnsComparisonWithFunctionNode()
+    [Test]
+    public async Task ParseCondition_SizeInComparison_ReturnsComparisonWithFunctionNode()
     {
         var result = DynamoDbExpressionParser.ParseCondition("size(items) > :maxSize");
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        var sizeFunc = Assert.IsType<FunctionNode>(comp.Left);
-        Assert.Equal("size", sizeFunc.FunctionName);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Left).IsTypeOf<FunctionNode>();
+        var sizeFunc = (FunctionNode)comp.Left;
+        await Assert.That(sizeFunc.FunctionName).IsEqualTo("size");
     }
 
-    [Fact]
-    public void ParseCondition_DocumentPathWithDots_ResolvesCorrectly()
+    [Test]
+    public async Task ParseCondition_DocumentPathWithDots_ResolvesCorrectly()
     {
         var result = DynamoDbExpressionParser.ParseCondition("user.address.city = :city");
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        var path = Assert.IsType<PathNode>(comp.Left);
-        Assert.Equal(3, path.Path.Elements.Count);
-        Assert.Equal("user", ((AttributeElement)path.Path.Elements[0]).Name);
-        Assert.Equal("address", ((AttributeElement)path.Path.Elements[1]).Name);
-        Assert.Equal("city", ((AttributeElement)path.Path.Elements[2]).Name);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Left).IsTypeOf<PathNode>();
+        var path = (PathNode)comp.Left;
+        await Assert.That(path.Path.Elements).Count().IsEqualTo(3);
+        await Assert.That(((AttributeElement)path.Path.Elements[0]).Name).IsEqualTo("user");
+        await Assert.That(((AttributeElement)path.Path.Elements[1]).Name).IsEqualTo("address");
+        await Assert.That(((AttributeElement)path.Path.Elements[2]).Name).IsEqualTo("city");
     }
 
-    [Fact]
-    public void ParseCondition_DocumentPathWithListIndex_ResolvesCorrectly()
+    [Test]
+    public async Task ParseCondition_DocumentPathWithListIndex_ResolvesCorrectly()
     {
         var result = DynamoDbExpressionParser.ParseCondition("items[0].name = :val");
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        var path = Assert.IsType<PathNode>(comp.Left);
-        Assert.Equal(3, path.Path.Elements.Count);
-        Assert.Equal("items", ((AttributeElement)path.Path.Elements[0]).Name);
-        Assert.Equal(0, ((IndexElement)path.Path.Elements[1]).Index);
-        Assert.Equal("name", ((AttributeElement)path.Path.Elements[2]).Name);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Left).IsTypeOf<PathNode>();
+        var path = (PathNode)comp.Left;
+        await Assert.That(path.Path.Elements).Count().IsEqualTo(3);
+        await Assert.That(((AttributeElement)path.Path.Elements[0]).Name).IsEqualTo("items");
+        await Assert.That(((IndexElement)path.Path.Elements[1]).Index).IsEqualTo(0);
+        await Assert.That(((AttributeElement)path.Path.Elements[2]).Name).IsEqualTo("name");
     }
 
-    [Fact]
-    public void ParseCondition_ExpressionAttributeNames_ResolvesPlaceholders()
+    [Test]
+    public async Task ParseCondition_ExpressionAttributeNames_ResolvesPlaceholders()
     {
         var names = new Dictionary<string, string> { { "#s", "status" } };
 
         var result = DynamoDbExpressionParser.ParseCondition("#s = :val", names);
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        var path = Assert.IsType<PathNode>(comp.Left);
-        Assert.Equal("status", ((AttributeElement)path.Path.Elements[0]).Name);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Left).IsTypeOf<PathNode>();
+        var path = (PathNode)comp.Left;
+        await Assert.That(((AttributeElement)path.Path.Elements[0]).Name).IsEqualTo("status");
     }
 
-    [Fact]
-    public void ParseCondition_NestedNamePlaceholders_ResolveCorrectly()
+    [Test]
+    public async Task ParseCondition_NestedNamePlaceholders_ResolveCorrectly()
     {
         var names = new Dictionary<string, string>
         {
@@ -240,37 +272,42 @@ public class ConditionExpressionParserTests
 
         var result = DynamoDbExpressionParser.ParseCondition("#u.#n = :val", names);
 
-        var comp = Assert.IsType<ComparisonNode>(result);
-        var path = Assert.IsType<PathNode>(comp.Left);
-        Assert.Equal(2, path.Path.Elements.Count);
-        Assert.Equal("user", ((AttributeElement)path.Path.Elements[0]).Name);
-        Assert.Equal("name", ((AttributeElement)path.Path.Elements[1]).Name);
+        await Assert.That(result).IsTypeOf<ComparisonNode>();
+        var comp = (ComparisonNode)result;
+        await Assert.That(comp.Left).IsTypeOf<PathNode>();
+        var path = (PathNode)comp.Left;
+        await Assert.That(path.Path.Elements).Count().IsEqualTo(2);
+        await Assert.That(((AttributeElement)path.Path.Elements[0]).Name).IsEqualTo("user");
+        await Assert.That(((AttributeElement)path.Path.Elements[1]).Name).IsEqualTo("name");
     }
 
-    [Fact]
-    public void ParseCondition_MalformedExpression_ThrowsValidationException()
+    [Test]
+    public async Task ParseCondition_MalformedExpression_ThrowsValidationException()
     {
-        Assert.Throws<ValidationException>(() =>
-            DynamoDbExpressionParser.ParseCondition("AND price = :val"));
+        await Assert.That(() =>
+            DynamoDbExpressionParser.ParseCondition("AND price = :val"))
+            .ThrowsExactly<ValidationException>();
     }
 
-    [Fact]
-    public void ParseCondition_ComplexNestedExpression_ParsesCorrectly()
+    [Test]
+    public async Task ParseCondition_ComplexNestedExpression_ParsesCorrectly()
     {
         var result = DynamoDbExpressionParser.ParseCondition(
             "attribute_exists(pk) AND (price > :min OR price < :max) AND NOT contains(tags, :tag)");
 
-        var and1 = Assert.IsType<LogicalNode>(result);
-        Assert.Equal("AND", and1.Operator);
+        await Assert.That(result).IsTypeOf<LogicalNode>();
+        var and1 = (LogicalNode)result;
+        await Assert.That(and1.Operator).IsEqualTo("AND");
     }
 
-    [Fact]
-    public void ParseCondition_CaseInsensitiveKeywords_ParsesCorrectly()
+    [Test]
+    public async Task ParseCondition_CaseInsensitiveKeywords_ParsesCorrectly()
     {
         var result = DynamoDbExpressionParser.ParseCondition("a = :v1 and b = :v2 or c = :v3");
 
         // Should parse as: (a = :v1 AND b = :v2) OR c = :v3
-        var or = Assert.IsType<LogicalNode>(result);
-        Assert.Equal("OR", or.Operator);
+        await Assert.That(result).IsTypeOf<LogicalNode>();
+        var or = (LogicalNode)result;
+        await Assert.That(or.Operator).IsEqualTo("OR");
     }
 }

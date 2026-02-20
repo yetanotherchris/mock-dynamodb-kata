@@ -4,17 +4,14 @@ using MockDynamoDB.Tests.Spec.Fixtures;
 
 namespace MockDynamoDB.Tests.Spec;
 
-public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
+[ClassDataSource<MockDynamoDbFixture>(Shared = SharedType.PerTestSession)]
+public class UpdateItemTests(MockDynamoDbFixture fixture)
 {
-    private readonly AmazonDynamoDBClient _client;
+    private readonly AmazonDynamoDBClient _client = fixture.Client;
     private readonly string _tableName = $"update-{Guid.NewGuid():N}";
 
-    public UpdateItemTests(MockDynamoDbFixture fixture)
-    {
-        _client = fixture.Client;
-    }
-
-    public async ValueTask InitializeAsync()
+    [Before(Test)]
+    public async Task SetUp()
     {
         await _client.CreateTableAsync(new CreateTableRequest
         {
@@ -25,12 +22,13 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
         });
     }
 
-    public async ValueTask DisposeAsync()
+    [After(Test)]
+    public async Task TearDown()
     {
         try { await _client.DeleteTableAsync(_tableName); } catch { }
     }
 
-    [Fact]
+    [Test]
     public async Task UpdateItem_SetAttribute()
     {
         await _client.PutItemAsync(_tableName, new Dictionary<string, AttributeValue>
@@ -49,10 +47,10 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
         });
 
         var result = await _client.GetItemAsync(_tableName, new() { ["pk"] = new() { S = "u1" } });
-        Assert.Equal("Bob", result.Item["name"].S);
+        await Assert.That(result.Item["name"].S).IsEqualTo("Bob");
     }
 
-    [Fact]
+    [Test]
     public async Task UpdateItem_Arithmetic()
     {
         await _client.PutItemAsync(_tableName, new Dictionary<string, AttributeValue>
@@ -71,10 +69,10 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
         });
 
         var result = await _client.GetItemAsync(_tableName, new() { ["pk"] = new() { S = "u2" } });
-        Assert.Equal("8", result.Item["count"].N);
+        await Assert.That(result.Item["count"].N).IsEqualTo("8");
     }
 
-    [Fact]
+    [Test]
     public async Task UpdateItem_Remove()
     {
         await _client.PutItemAsync(_tableName, new Dictionary<string, AttributeValue>
@@ -91,10 +89,10 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
         });
 
         var result = await _client.GetItemAsync(_tableName, new() { ["pk"] = new() { S = "u3" } });
-        Assert.False(result.Item.ContainsKey("temp"));
+        await Assert.That(result.Item.ContainsKey("temp")).IsFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task UpdateItem_ConditionFails_ThrowsConditionalCheckFailedException()
     {
         await _client.PutItemAsync(_tableName, new Dictionary<string, AttributeValue>
@@ -103,7 +101,7 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
             ["status"] = new() { S = "active" }
         });
 
-        await Assert.ThrowsAsync<ConditionalCheckFailedException>(() =>
+        await Assert.That(() =>
             _client.UpdateItemAsync(new UpdateItemRequest
             {
                 TableName = _tableName,
@@ -116,10 +114,10 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
                     [":new"] = new() { S = "inactive" },
                     [":expected"] = new() { S = "wrong" }
                 }
-            }));
+            })).ThrowsExactly<ConditionalCheckFailedException>();
     }
 
-    [Fact]
+    [Test]
     public async Task UpdateItem_ReturnAllNew()
     {
         await _client.PutItemAsync(_tableName, new Dictionary<string, AttributeValue>
@@ -138,11 +136,11 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
             ReturnValues = ReturnValue.ALL_NEW
         });
 
-        Assert.Equal("2", result.Attributes["count"].N);
-        Assert.Equal("u5", result.Attributes["pk"].S);
+        await Assert.That(result.Attributes["count"].N).IsEqualTo("2");
+        await Assert.That(result.Attributes["pk"].S).IsEqualTo("u5");
     }
 
-    [Fact]
+    [Test]
     public async Task UpdateItem_Upsert_CreatesNewItem()
     {
         await _client.UpdateItemAsync(new UpdateItemRequest
@@ -155,11 +153,11 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
         });
 
         var result = await _client.GetItemAsync(_tableName, new() { ["pk"] = new() { S = "new-item" } });
-        Assert.True(result.IsItemSet);
-        Assert.Equal("Created", result.Item["name"].S);
+        await Assert.That(result.IsItemSet).IsTrue();
+        await Assert.That(result.Item["name"].S).IsEqualTo("Created");
     }
 
-    [Fact]
+    [Test]
     public async Task UpdateItem_AddToSet()
     {
         await _client.PutItemAsync(_tableName, new Dictionary<string, AttributeValue>
@@ -177,12 +175,12 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
         });
 
         var result = await _client.GetItemAsync(_tableName, new() { ["pk"] = new() { S = "u6" } });
-        Assert.Contains("a", result.Item["tags"].SS);
-        Assert.Contains("b", result.Item["tags"].SS);
-        Assert.Contains("c", result.Item["tags"].SS);
+        await Assert.That(result.Item["tags"].SS).Contains("a");
+        await Assert.That(result.Item["tags"].SS).Contains("b");
+        await Assert.That(result.Item["tags"].SS).Contains("c");
     }
 
-    [Fact]
+    [Test]
     public async Task UpdateItem_DeleteFromSet()
     {
         await _client.PutItemAsync(_tableName, new Dictionary<string, AttributeValue>
@@ -200,8 +198,8 @@ public class UpdateItemTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetim
         });
 
         var result = await _client.GetItemAsync(_tableName, new() { ["pk"] = new() { S = "u7" } });
-        Assert.DoesNotContain("b", result.Item["tags"].SS);
-        Assert.Contains("a", result.Item["tags"].SS);
-        Assert.Contains("c", result.Item["tags"].SS);
+        await Assert.That(result.Item["tags"].SS).DoesNotContain("b");
+        await Assert.That(result.Item["tags"].SS).Contains("a");
+        await Assert.That(result.Item["tags"].SS).Contains("c");
     }
 }

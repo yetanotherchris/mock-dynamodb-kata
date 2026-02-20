@@ -9,7 +9,7 @@ Mock DynamoDB is an in-memory mock of AWS DynamoDB written in C#/.NET 10.0. It i
 - **.NET 10.0** (C#, nullable reference types, implicit usings)
 - **ASP.NET Core** minimal API for HTTP hosting
 - **ANTLR4** for expression parsing (condition, filter, key condition, update expressions)
-- **xUnit v3** (3.2.2) for testing
+- **TUnit** for testing (source-generated, async-first)
 - **AWS SDK for .NET v4** (`AWSSDK.DynamoDBv2` 4.0.14) in integration tests
 - **Docker** multi-stage build, exposes port 8000
 
@@ -28,8 +28,8 @@ src/
     Middleware/               # DynamoDbRequestRouter (X-Amz-Target dispatch)
     Program.cs                # Entry point, DI registration
 tests/
-  MockDynamoDB.Tests.Unit/    # Expression parser unit tests (xUnit)
-  MockDynamoDB.Tests.Spec/    # Integration tests using AWS SDK v4 (xUnit)
+  MockDynamoDB.Tests.Unit/    # Expression parser unit tests (TUnit)
+  MockDynamoDB.Tests.Spec/    # Integration tests using AWS SDK v4 (TUnit)
     Fixtures/                 # MockDynamoDbFixture (WebApplicationFactory-based)
 ```
 
@@ -77,10 +77,11 @@ Local Secondary Indexes are supported on Query.
 ## Testing Conventions
 
 - Integration tests use `WebApplicationFactory<Program>` for in-process hosting (no network)
-- `MockDynamoDbFixture` provides a shared `AmazonDynamoDBClient` configured with fake credentials and `DisableDangerousDisablePathAndQueryCanonicalization = true`
-- Test classes use `IClassFixture<MockDynamoDbFixture>` for shared client lifecycle
+- `MockDynamoDbFixture` implements `IAsyncInitializer` and `IAsyncDisposable`, providing a shared `AmazonDynamoDBClient` configured with fake credentials and `DisableDangerousDisablePathAndQueryCanonicalization = true`
+- Test classes use `[ClassDataSource<MockDynamoDbFixture>(Shared = SharedType.PerTestSession)]` for shared client lifecycle
 - Table names include `Guid.NewGuid()` for parallel test isolation
-- Classes with seeded data implement `IAsyncLifetime` for setup/teardown
+- Classes with seeded data use `[Before(Test)]` / `[After(Test)]` hooks for setup/teardown
+- All test methods are `async Task` with awaited TUnit assertions (`await Assert.That(...).IsEqualTo(...)`)
 
 ## OpenSpec Workflow
 

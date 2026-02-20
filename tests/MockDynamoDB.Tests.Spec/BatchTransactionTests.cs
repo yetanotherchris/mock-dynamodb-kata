@@ -4,17 +4,14 @@ using MockDynamoDB.Tests.Spec.Fixtures;
 
 namespace MockDynamoDB.Tests.Spec;
 
-public class BatchTransactionTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
+[ClassDataSource<MockDynamoDbFixture>(Shared = SharedType.PerTestSession)]
+public class BatchTransactionTests(MockDynamoDbFixture fixture)
 {
-    private readonly AmazonDynamoDBClient _client;
+    private readonly AmazonDynamoDBClient _client = fixture.Client;
     private readonly string _tableName = $"batch-{Guid.NewGuid():N}";
 
-    public BatchTransactionTests(MockDynamoDbFixture fixture)
-    {
-        _client = fixture.Client;
-    }
-
-    public async ValueTask InitializeAsync()
+    [Before(Test)]
+    public async Task SetUp()
     {
         await _client.CreateTableAsync(new CreateTableRequest
         {
@@ -25,12 +22,13 @@ public class BatchTransactionTests : IClassFixture<MockDynamoDbFixture>, IAsyncL
         });
     }
 
-    public async ValueTask DisposeAsync()
+    [After(Test)]
+    public async Task TearDown()
     {
         try { await _client.DeleteTableAsync(_tableName); } catch { }
     }
 
-    [Fact]
+    [Test]
     public async Task BatchWriteItem_PutMultiple()
     {
         var result = await _client.BatchWriteItemAsync(new BatchWriteItemRequest
@@ -46,13 +44,13 @@ public class BatchTransactionTests : IClassFixture<MockDynamoDbFixture>, IAsyncL
             }
         });
 
-        Assert.Empty(result.UnprocessedItems);
+        await Assert.That(result.UnprocessedItems).IsEmpty();
 
         var scan = await _client.ScanAsync(new ScanRequest { TableName = _tableName });
-        Assert.True(scan.Count >= 3);
+        await Assert.That(scan.Items.Count).IsGreaterThanOrEqualTo(3);
     }
 
-    [Fact]
+    [Test]
     public async Task BatchGetItem_GetMultiple()
     {
         await _client.PutItemAsync(_tableName, new() { ["pk"] = new() { S = "bg1" }, ["val"] = new() { S = "x" } });
@@ -74,11 +72,11 @@ public class BatchTransactionTests : IClassFixture<MockDynamoDbFixture>, IAsyncL
             }
         });
 
-        Assert.Equal(2, result.Responses[_tableName].Count);
-        Assert.Empty(result.UnprocessedKeys);
+        await Assert.That(result.Responses[_tableName]).Count().IsEqualTo(2);
+        await Assert.That(result.UnprocessedKeys).IsEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task TransactWriteItems_AllSucceed()
     {
         await _client.TransactWriteItemsAsync(new TransactWriteItemsRequest
@@ -106,17 +104,19 @@ public class BatchTransactionTests : IClassFixture<MockDynamoDbFixture>, IAsyncL
 
         var r1 = await _client.GetItemAsync(_tableName, new() { ["pk"] = new() { S = "tx1" } });
         var r2 = await _client.GetItemAsync(_tableName, new() { ["pk"] = new() { S = "tx2" } });
-        Assert.True(r1.IsItemSet);
-        Assert.True(r2.IsItemSet);
+        await Assert.That(r1.IsItemSet).IsTrue();
+        await Assert.That(r2.IsItemSet).IsTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task TransactWriteItems_ConditionFails_NoneApplied()
     {
         await _client.PutItemAsync(_tableName, new() { ["pk"] = new() { S = "txf1" }, ["status"] = new() { S = "done" } });
 
-        var ex = await Assert.ThrowsAsync<TransactionCanceledException>(() =>
-            _client.TransactWriteItemsAsync(new TransactWriteItemsRequest
+        TransactionCanceledException? ex = null;
+        try
+        {
+            await _client.TransactWriteItemsAsync(new TransactWriteItemsRequest
             {
                 TransactItems =
                 [
@@ -140,16 +140,22 @@ public class BatchTransactionTests : IClassFixture<MockDynamoDbFixture>, IAsyncL
                         }
                     }
                 ]
-            }));
+            });
+        }
+        catch (TransactionCanceledException caught)
+        {
+            ex = caught;
+        }
 
-        Assert.NotNull(ex.CancellationReasons);
+        await Assert.That(ex).IsNotNull();
+        await Assert.That(ex!.CancellationReasons).IsNotNull();
 
         // txf2 should NOT have been written
         var r = await _client.GetItemAsync(_tableName, new() { ["pk"] = new() { S = "txf2" } });
-        Assert.False(r.IsItemSet);
+        await Assert.That(r.IsItemSet).IsFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task TransactGetItems_ReturnsItems()
     {
         await _client.PutItemAsync(_tableName, new() { ["pk"] = new() { S = "tg1" }, ["val"] = new() { S = "a" } });
@@ -165,9 +171,9 @@ public class BatchTransactionTests : IClassFixture<MockDynamoDbFixture>, IAsyncL
             ]
         });
 
-        Assert.Equal(3, result.Responses.Count);
-        Assert.Equal("a", result.Responses[0].Item["val"].S);
-        Assert.Equal("b", result.Responses[1].Item["val"].S);
-        Assert.True(result.Responses[2].Item == null || result.Responses[2].Item.Count == 0);
+        await Assert.That(result.Responses).Count().IsEqualTo(3);
+        await Assert.That(result.Responses[0].Item["val"].S).IsEqualTo("a");
+        await Assert.That(result.Responses[1].Item["val"].S).IsEqualTo("b");
+        await Assert.That(result.Responses[2].Item == null || result.Responses[2].Item.Count == 0).IsTrue();
     }
 }

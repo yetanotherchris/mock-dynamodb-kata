@@ -4,17 +4,14 @@ using MockDynamoDB.Tests.Spec.Fixtures;
 
 namespace MockDynamoDB.Tests.Spec;
 
-public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
+[ClassDataSource<MockDynamoDbFixture>(Shared = SharedType.PerTestSession)]
+public class QueryScanTests(MockDynamoDbFixture fixture)
 {
-    private readonly AmazonDynamoDBClient _client;
+    private readonly AmazonDynamoDBClient _client = fixture.Client;
     private readonly string _tableName = $"qs-{Guid.NewGuid():N}";
 
-    public QueryScanTests(MockDynamoDbFixture fixture)
-    {
-        _client = fixture.Client;
-    }
-
-    public async ValueTask InitializeAsync()
+    [Before(Test)]
+    public async Task SetUp()
     {
         await _client.CreateTableAsync(new CreateTableRequest
         {
@@ -51,12 +48,13 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
         });
     }
 
-    public async ValueTask DisposeAsync()
+    [After(Test)]
+    public async Task TearDown()
     {
         try { await _client.DeleteTableAsync(_tableName); } catch { }
     }
 
-    [Fact]
+    [Test]
     public async Task Query_PartitionKeyOnly()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -66,10 +64,10 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             ExpressionAttributeValues = new() { [":pk"] = new() { S = "user1" } }
         });
 
-        Assert.Equal(5, result.Count);
+        await Assert.That(result.Count).IsEqualTo(5);
     }
 
-    [Fact]
+    [Test]
     public async Task Query_WithSortKeyBeginsWith()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -83,10 +81,10 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             }
         });
 
-        Assert.Equal(5, result.Count);
+        await Assert.That(result.Count).IsEqualTo(5);
     }
 
-    [Fact]
+    [Test]
     public async Task Query_WithSortKeyBetween()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -101,10 +99,10 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             }
         });
 
-        Assert.Equal(3, result.Count);
+        await Assert.That(result.Count).IsEqualTo(3);
     }
 
-    [Fact]
+    [Test]
     public async Task Query_ReverseOrder()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -115,11 +113,11 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             ScanIndexForward = false
         });
 
-        Assert.Equal("order#005", result.Items[0]["sk"].S);
-        Assert.Equal("order#001", result.Items[^1]["sk"].S);
+        await Assert.That(result.Items[0]["sk"].S).IsEqualTo("order#005");
+        await Assert.That(result.Items[^1]["sk"].S).IsEqualTo("order#001");
     }
 
-    [Fact]
+    [Test]
     public async Task Query_WithFilterExpression()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -134,10 +132,10 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             }
         });
 
-        Assert.Equal(2, result.Count); // items with amount 40, 50
+        await Assert.That(result.Count).IsEqualTo(2); // items with amount 40, 50
     }
 
-    [Fact]
+    [Test]
     public async Task Query_WithLimit()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -148,11 +146,11 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             Limit = 2
         });
 
-        Assert.Equal(2, result.Items.Count);
-        Assert.NotNull(result.LastEvaluatedKey);
+        await Assert.That(result.Items).Count().IsEqualTo(2);
+        await Assert.That(result.LastEvaluatedKey).IsNotNull();
     }
 
-    [Fact]
+    [Test]
     public async Task Scan_AllItems()
     {
         var result = await _client.ScanAsync(new ScanRequest
@@ -160,10 +158,10 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             TableName = _tableName
         });
 
-        Assert.Equal(6, result.Count); // 5 user1 + 1 user2
+        await Assert.That(result.Count).IsEqualTo(6); // 5 user1 + 1 user2
     }
 
-    [Fact]
+    [Test]
     public async Task Scan_WithFilterExpression()
     {
         var result = await _client.ScanAsync(new ScanRequest
@@ -173,10 +171,10 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             ExpressionAttributeValues = new() { [":pk"] = new() { S = "user2" } }
         });
 
-        Assert.Equal(1, result.Count);
+        await Assert.That(result.Count).IsEqualTo(1);
     }
 
-    [Fact]
+    [Test]
     public async Task Scan_WithLimit()
     {
         var result = await _client.ScanAsync(new ScanRequest
@@ -185,11 +183,11 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             Limit = 3
         });
 
-        Assert.Equal(3, result.Items.Count);
-        Assert.NotNull(result.LastEvaluatedKey);
+        await Assert.That(result.Items).Count().IsEqualTo(3);
+        await Assert.That(result.LastEvaluatedKey).IsNotNull();
     }
 
-    [Fact]
+    [Test]
     public async Task Scan_Pagination()
     {
         var allItems = new List<Dictionary<string, AttributeValue>>();
@@ -208,6 +206,6 @@ public class QueryScanTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             lastKey = result.LastEvaluatedKey;
         } while (lastKey != null && lastKey.Count > 0);
 
-        Assert.Equal(6, allItems.Count);
+        await Assert.That(allItems).Count().IsEqualTo(6);
     }
 }
