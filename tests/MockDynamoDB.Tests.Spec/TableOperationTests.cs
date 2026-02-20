@@ -4,16 +4,12 @@ using MockDynamoDB.Tests.Spec.Fixtures;
 
 namespace MockDynamoDB.Tests.Spec;
 
-public class TableOperationTests : IClassFixture<MockDynamoDbFixture>
+[ClassDataSource<MockDynamoDbFixture>(Shared = SharedType.PerTestSession)]
+public class TableOperationTests(MockDynamoDbFixture fixture)
 {
-    private readonly AmazonDynamoDBClient _client;
+    private readonly AmazonDynamoDBClient _client = fixture.Client;
 
-    public TableOperationTests(MockDynamoDbFixture fixture)
-    {
-        _client = fixture.Client;
-    }
-
-    [Fact]
+    [Test]
     public async Task CreateTable_SimpleHashKey_ReturnsActive()
     {
         var tableName = $"test-{Guid.NewGuid():N}";
@@ -25,13 +21,13 @@ public class TableOperationTests : IClassFixture<MockDynamoDbFixture>
             BillingMode = BillingMode.PAY_PER_REQUEST
         });
 
-        Assert.Equal("ACTIVE", response.TableDescription.TableStatus.Value);
-        Assert.Equal(tableName, response.TableDescription.TableName);
+        await Assert.That(response.TableDescription.TableStatus.Value).IsEqualTo("ACTIVE");
+        await Assert.That(response.TableDescription.TableName).IsEqualTo(tableName);
 
         await _client.DeleteTableAsync(tableName);
     }
 
-    [Fact]
+    [Test]
     public async Task CreateTable_HashAndRangeKey_ReturnsActive()
     {
         var tableName = $"test-{Guid.NewGuid():N}";
@@ -51,13 +47,13 @@ public class TableOperationTests : IClassFixture<MockDynamoDbFixture>
             BillingMode = BillingMode.PAY_PER_REQUEST
         });
 
-        Assert.Equal("ACTIVE", response.TableDescription.TableStatus.Value);
-        Assert.Equal(2, response.TableDescription.KeySchema.Count);
+        await Assert.That(response.TableDescription.TableStatus.Value).IsEqualTo("ACTIVE");
+        await Assert.That(response.TableDescription.KeySchema).HasCount().EqualTo(2);
 
         await _client.DeleteTableAsync(tableName);
     }
 
-    [Fact]
+    [Test]
     public async Task CreateTable_AlreadyExists_ThrowsResourceInUseException()
     {
         var tableName = $"test-{Guid.NewGuid():N}";
@@ -69,19 +65,19 @@ public class TableOperationTests : IClassFixture<MockDynamoDbFixture>
             BillingMode = BillingMode.PAY_PER_REQUEST
         });
 
-        await Assert.ThrowsAsync<ResourceInUseException>(() =>
+        await Assert.That(() =>
             _client.CreateTableAsync(new CreateTableRequest
             {
                 TableName = tableName,
                 KeySchema = [new KeySchemaElement("pk", KeyType.HASH)],
                 AttributeDefinitions = [new AttributeDefinition("pk", ScalarAttributeType.S)],
                 BillingMode = BillingMode.PAY_PER_REQUEST
-            }));
+            })).ThrowsExactly<ResourceInUseException>();
 
         await _client.DeleteTableAsync(tableName);
     }
 
-    [Fact]
+    [Test]
     public async Task DescribeTable_Exists_ReturnsTableInfo()
     {
         var tableName = $"test-{Guid.NewGuid():N}";
@@ -95,20 +91,21 @@ public class TableOperationTests : IClassFixture<MockDynamoDbFixture>
 
         var response = await _client.DescribeTableAsync(tableName);
 
-        Assert.Equal(tableName, response.Table.TableName);
-        Assert.Equal("ACTIVE", response.Table.TableStatus.Value);
+        await Assert.That(response.Table.TableName).IsEqualTo(tableName);
+        await Assert.That(response.Table.TableStatus.Value).IsEqualTo("ACTIVE");
 
         await _client.DeleteTableAsync(tableName);
     }
 
-    [Fact]
+    [Test]
     public async Task DescribeTable_NotExists_ThrowsResourceNotFoundException()
     {
-        await Assert.ThrowsAsync<ResourceNotFoundException>(() =>
-            _client.DescribeTableAsync("nonexistent-table"));
+        await Assert.That(() =>
+            _client.DescribeTableAsync("nonexistent-table"))
+            .ThrowsExactly<ResourceNotFoundException>();
     }
 
-    [Fact]
+    [Test]
     public async Task DeleteTable_Exists_RemovesTable()
     {
         var tableName = $"test-{Guid.NewGuid():N}";
@@ -122,18 +119,20 @@ public class TableOperationTests : IClassFixture<MockDynamoDbFixture>
 
         await _client.DeleteTableAsync(tableName);
 
-        await Assert.ThrowsAsync<ResourceNotFoundException>(() =>
-            _client.DescribeTableAsync(tableName));
+        await Assert.That(() =>
+            _client.DescribeTableAsync(tableName))
+            .ThrowsExactly<ResourceNotFoundException>();
     }
 
-    [Fact]
+    [Test]
     public async Task DeleteTable_NotExists_ThrowsResourceNotFoundException()
     {
-        await Assert.ThrowsAsync<ResourceNotFoundException>(() =>
-            _client.DeleteTableAsync("nonexistent-table"));
+        await Assert.That(() =>
+            _client.DeleteTableAsync("nonexistent-table"))
+            .ThrowsExactly<ResourceNotFoundException>();
     }
 
-    [Fact]
+    [Test]
     public async Task ListTables_ReturnsAllTableNames()
     {
         var name1 = $"test-a-{Guid.NewGuid():N}";
@@ -156,8 +155,8 @@ public class TableOperationTests : IClassFixture<MockDynamoDbFixture>
 
         var response = await _client.ListTablesAsync();
 
-        Assert.Contains(name1, response.TableNames);
-        Assert.Contains(name2, response.TableNames);
+        await Assert.That(response.TableNames).Contains(name1);
+        await Assert.That(response.TableNames).Contains(name2);
 
         await _client.DeleteTableAsync(name1);
         await _client.DeleteTableAsync(name2);

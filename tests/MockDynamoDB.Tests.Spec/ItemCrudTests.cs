@@ -4,17 +4,14 @@ using MockDynamoDB.Tests.Spec.Fixtures;
 
 namespace MockDynamoDB.Tests.Spec;
 
-public class ItemCrudTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
+[ClassDataSource<MockDynamoDbFixture>(Shared = SharedType.PerTestSession)]
+public class ItemCrudTests(MockDynamoDbFixture fixture)
 {
-    private readonly AmazonDynamoDBClient _client;
+    private readonly AmazonDynamoDBClient _client = fixture.Client;
     private readonly string _tableName = $"items-{Guid.NewGuid():N}";
 
-    public ItemCrudTests(MockDynamoDbFixture fixture)
-    {
-        _client = fixture.Client;
-    }
-
-    public async ValueTask InitializeAsync()
+    [Before(Test)]
+    public async Task SetUp()
     {
         await _client.CreateTableAsync(new CreateTableRequest
         {
@@ -33,12 +30,13 @@ public class ItemCrudTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
         });
     }
 
-    public async ValueTask DisposeAsync()
+    [After(Test)]
+    public async Task TearDown()
     {
         try { await _client.DeleteTableAsync(_tableName); } catch { }
     }
 
-    [Fact]
+    [Test]
     public async Task PutItem_AndGetItem_ReturnsStoredItem()
     {
         await _client.PutItemAsync(_tableName, new Dictionary<string, AttributeValue>
@@ -54,11 +52,11 @@ public class ItemCrudTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             ["sk"] = new() { S = "profile" }
         });
 
-        Assert.True(response.IsItemSet);
-        Assert.Equal("Alice", response.Item["name"].S);
+        await Assert.That(response.IsItemSet).IsTrue();
+        await Assert.That(response.Item["name"].S).IsEqualTo("Alice");
     }
 
-    [Fact]
+    [Test]
     public async Task GetItem_NonExistent_ReturnsNoItem()
     {
         var response = await _client.GetItemAsync(_tableName, new Dictionary<string, AttributeValue>
@@ -67,10 +65,10 @@ public class ItemCrudTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             ["sk"] = new() { S = "missing" }
         });
 
-        Assert.False(response.IsItemSet);
+        await Assert.That(response.IsItemSet).IsFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task PutItem_ReplacesExisting()
     {
         var key = new Dictionary<string, AttributeValue>
@@ -90,10 +88,10 @@ public class ItemCrudTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
         });
 
         var response = await _client.GetItemAsync(_tableName, key);
-        Assert.Equal("Bob", response.Item["name"].S);
+        await Assert.That(response.Item["name"].S).IsEqualTo("Bob");
     }
 
-    [Fact]
+    [Test]
     public async Task DeleteItem_RemovesItem()
     {
         var key = new Dictionary<string, AttributeValue>
@@ -110,10 +108,10 @@ public class ItemCrudTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
         await _client.DeleteItemAsync(_tableName, key);
 
         var response = await _client.GetItemAsync(_tableName, key);
-        Assert.False(response.IsItemSet);
+        await Assert.That(response.IsItemSet).IsFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task DeleteItem_WithReturnValuesAllOld_ReturnsDeletedItem()
     {
         var key = new Dictionary<string, AttributeValue>
@@ -134,10 +132,10 @@ public class ItemCrudTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             ReturnValues = ReturnValue.ALL_OLD
         });
 
-        Assert.Equal("value", response.Attributes["data"].S);
+        await Assert.That(response.Attributes["data"].S).IsEqualTo("value");
     }
 
-    [Fact]
+    [Test]
     public async Task PutItem_AllAttributeTypes()
     {
         var item = new Dictionary<string, AttributeValue>
@@ -168,23 +166,23 @@ public class ItemCrudTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             ["sk"] = new() { S = "test" }
         });
 
-        Assert.Equal("hello", response.Item["stringAttr"].S);
-        Assert.Equal("42", response.Item["numberAttr"].N);
-        Assert.True(response.Item["boolAttr"].BOOL);
-        Assert.True(response.Item["nullAttr"].NULL);
-        Assert.Equal(2, response.Item["listAttr"].L.Count);
-        Assert.Equal("value", response.Item["mapAttr"].M["nested"].S);
-        Assert.Equal(3, response.Item["stringSet"].SS.Count);
-        Assert.Equal(3, response.Item["numberSet"].NS.Count);
+        await Assert.That(response.Item["stringAttr"].S).IsEqualTo("hello");
+        await Assert.That(response.Item["numberAttr"].N).IsEqualTo("42");
+        await Assert.That(response.Item["boolAttr"].BOOL).IsTrue();
+        await Assert.That(response.Item["nullAttr"].NULL).IsTrue();
+        await Assert.That(response.Item["listAttr"].L).HasCount().EqualTo(2);
+        await Assert.That(response.Item["mapAttr"].M["nested"].S).IsEqualTo("value");
+        await Assert.That(response.Item["stringSet"].SS).HasCount().EqualTo(3);
+        await Assert.That(response.Item["numberSet"].NS).HasCount().EqualTo(3);
     }
 
-    [Fact]
+    [Test]
     public async Task PutItem_TableNotExists_ThrowsResourceNotFoundException()
     {
-        await Assert.ThrowsAsync<ResourceNotFoundException>(() =>
+        await Assert.That(() =>
             _client.PutItemAsync("nonexistent", new Dictionary<string, AttributeValue>
             {
                 ["pk"] = new() { S = "test" }
-            }));
+            })).ThrowsExactly<ResourceNotFoundException>();
     }
 }

@@ -5,13 +5,13 @@ using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace MockDynamoDB.Tests.Spec.Fixtures;
 
-public class MockDynamoDbFixture : IAsyncLifetime
+public class MockDynamoDbFixture : IAsyncInitializer, IAsyncDisposable
 {
     private WebApplicationFactory<Program>? _factory;
 
     public AmazonDynamoDBClient Client { get; private set; } = null!;
 
-    public ValueTask InitializeAsync()
+    public Task InitializeAsync()
     {
         AWSConfigs.DisableDangerousDisablePathAndQueryCanonicalization = true;
 
@@ -29,7 +29,7 @@ public class MockDynamoDbFixture : IAsyncLifetime
         var credentials = new BasicAWSCredentials("fake", "fake");
         Client = new AmazonDynamoDBClient(credentials, config);
 
-        return ValueTask.CompletedTask;
+        return Task.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()

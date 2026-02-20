@@ -4,17 +4,14 @@ using MockDynamoDB.Tests.Spec.Fixtures;
 
 namespace MockDynamoDB.Tests.Spec;
 
-public class LsiTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
+[ClassDataSource<MockDynamoDbFixture>(Shared = SharedType.PerTestSession)]
+public class LsiTests(MockDynamoDbFixture fixture)
 {
-    private readonly AmazonDynamoDBClient _client;
+    private readonly AmazonDynamoDBClient _client = fixture.Client;
     private readonly string _tableName = $"lsi-{Guid.NewGuid():N}";
 
-    public LsiTests(MockDynamoDbFixture fixture)
-    {
-        _client = fixture.Client;
-    }
-
-    public async ValueTask InitializeAsync()
+    [Before(Test)]
+    public async Task SetUp()
     {
         await _client.CreateTableAsync(new CreateTableRequest
         {
@@ -77,12 +74,13 @@ public class LsiTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
         });
     }
 
-    public async ValueTask DisposeAsync()
+    [After(Test)]
+    public async Task TearDown()
     {
         try { await _client.DeleteTableAsync(_tableName); } catch { }
     }
 
-    [Fact]
+    [Test]
     public async Task Query_OnLsi_ReturnsSortedByLsiSortKey()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -93,13 +91,13 @@ public class LsiTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             ExpressionAttributeValues = new() { [":pk"] = new() { S = "user1" } }
         });
 
-        Assert.Equal(3, result.Count); // item#004 excluded (no lsiSk)
-        Assert.Equal("2024-01-01", result.Items[0]["lsiSk"].S);
-        Assert.Equal("2024-03-10", result.Items[1]["lsiSk"].S);
-        Assert.Equal("2024-06-15", result.Items[2]["lsiSk"].S);
+        await Assert.That(result.Count).IsEqualTo(3); // item#004 excluded (no lsiSk)
+        await Assert.That(result.Items[0]["lsiSk"].S).IsEqualTo("2024-01-01");
+        await Assert.That(result.Items[1]["lsiSk"].S).IsEqualTo("2024-03-10");
+        await Assert.That(result.Items[2]["lsiSk"].S).IsEqualTo("2024-06-15");
     }
 
-    [Fact]
+    [Test]
     public async Task Query_OnLsi_WithSortKeyCondition()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -114,10 +112,10 @@ public class LsiTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             }
         });
 
-        Assert.Equal(2, result.Count); // 2024-03-10 and 2024-06-15
+        await Assert.That(result.Count).IsEqualTo(2); // 2024-03-10 and 2024-06-15
     }
 
-    [Fact]
+    [Test]
     public async Task Query_OnLsi_ItemsWithoutLsiSk_Excluded()
     {
         // Main table has 4 items
@@ -127,7 +125,7 @@ public class LsiTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             KeyConditionExpression = "pk = :pk",
             ExpressionAttributeValues = new() { [":pk"] = new() { S = "user1" } }
         });
-        Assert.Equal(4, mainResult.Count);
+        await Assert.That(mainResult.Count).IsEqualTo(4);
 
         // LSI has 3 items (item#004 has no lsiSk)
         var lsiResult = await _client.QueryAsync(new QueryRequest
@@ -137,10 +135,10 @@ public class LsiTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             KeyConditionExpression = "pk = :pk",
             ExpressionAttributeValues = new() { [":pk"] = new() { S = "user1" } }
         });
-        Assert.Equal(3, lsiResult.Count);
+        await Assert.That(lsiResult.Count).IsEqualTo(3);
     }
 
-    [Fact]
+    [Test]
     public async Task Query_OnLsi_ReverseOrder()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -152,11 +150,11 @@ public class LsiTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             ScanIndexForward = false
         });
 
-        Assert.Equal("2024-06-15", result.Items[0]["lsiSk"].S);
-        Assert.Equal("2024-01-01", result.Items[^1]["lsiSk"].S);
+        await Assert.That(result.Items[0]["lsiSk"].S).IsEqualTo("2024-06-15");
+        await Assert.That(result.Items[^1]["lsiSk"].S).IsEqualTo("2024-01-01");
     }
 
-    [Fact]
+    [Test]
     public async Task Query_OnLsi_ReturnsAllAttributes()
     {
         var result = await _client.QueryAsync(new QueryRequest
@@ -171,26 +169,34 @@ public class LsiTests : IClassFixture<MockDynamoDbFixture>, IAsyncLifetime
             }
         });
 
-        Assert.Single(result.Items);
+        await Assert.That(result.Items).HasCount().EqualTo(1);
         var item = result.Items[0];
-        Assert.Equal("user1", item["pk"].S);
-        Assert.Equal("item#001", item["sk"].S);
-        Assert.Equal("2024-01-01", item["lsiSk"].S);
-        Assert.Equal("first", item["data"].S);
+        await Assert.That(item["pk"].S).IsEqualTo("user1");
+        await Assert.That(item["sk"].S).IsEqualTo("item#001");
+        await Assert.That(item["lsiSk"].S).IsEqualTo("2024-01-01");
+        await Assert.That(item["data"].S).IsEqualTo("first");
     }
 
-    [Fact]
+    [Test]
     public async Task Query_OnNonExistentIndex_ThrowsValidationException()
     {
-        var ex = await Assert.ThrowsAsync<AmazonDynamoDBException>(() =>
-            _client.QueryAsync(new QueryRequest
+        AmazonDynamoDBException? ex = null;
+        try
+        {
+            await _client.QueryAsync(new QueryRequest
             {
                 TableName = _tableName,
                 IndexName = "nonexistent-index",
                 KeyConditionExpression = "pk = :pk",
                 ExpressionAttributeValues = new() { [":pk"] = new() { S = "user1" } }
-            }));
+            });
+        }
+        catch (AmazonDynamoDBException caught)
+        {
+            ex = caught;
+        }
 
-        Assert.Contains("does not have the specified index", ex.Message);
+        await Assert.That(ex).IsNotNull();
+        await Assert.That(ex!.Message).Contains("does not have the specified index");
     }
 }
