@@ -1,7 +1,0 @@
-<Project>
-
-  <PropertyGroup>
-    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
-  </PropertyGroup>
-
-</Project>
