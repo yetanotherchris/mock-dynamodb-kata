@@ -19,13 +19,13 @@ public class MockDynamoDbFixture : IAsyncInitializer, IAsyncDisposable
         _factory = new WebApplicationFactory<Program>();
 
         var handler = _factory.Server.CreateHandler();
+        AWSConfigs.HttpClientFactory = new TestHttpClientFactory(handler);
+
         var config = new AmazonDynamoDBConfig
         {
             ServiceURL = _factory.Server.BaseAddress.ToString(),
             AuthenticationRegion = "us-east-1"
         };
-
-        config.HttpClientFactory = new TestHttpClientFactory(handler);
 
         var credentials = new BasicAWSCredentials("fake", "fake");
         Client = new AmazonDynamoDBClient(credentials, config);
