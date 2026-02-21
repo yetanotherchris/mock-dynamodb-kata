@@ -38,6 +38,24 @@ jobs:
       - name: Run integration tests
         run: dotnet test --project tests/MockDynamoDB.Tests.Spec --no-build --configuration Release --verbosity normal
 
+      - name: Verify Dockerfile base image tags exist
+        run: |
+          images=$(grep -E '^FROM ' Dockerfile | awk '{print $2}')
+          failed=0
+          for image in $images; do
+            echo "Checking: $image"
+            if docker manifest inspect "$image" > /dev/null 2>&1; then
+              echo "  OK: $image"
+            else
+              echo "  MISSING: $image"
+              failed=1
+            fi
+          done
+          if [ $failed -ne 0 ]; then
+            echo "One or more Dockerfile base image tags do not exist on the registry."
+            exit 1
+          fi
+
       - name: Set up Docker Buildx
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/setup-buildx-action@v3
