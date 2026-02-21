@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY MockDynamoDB.slnx .
@@ -9,7 +9,7 @@ RUN dotnet restore src/MockDynamoDB.Server/MockDynamoDB.Server.csproj
 COPY src/ src/
 RUN dotnet publish src/MockDynamoDB.Server/MockDynamoDB.Server.csproj -c Release -o /app --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app .
 
