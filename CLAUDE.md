@@ -120,6 +120,14 @@ When implementing a new feature or modifying behaviour:
 - **Trace tasks to scenarios.** Tasks in `tasks.md` should map back to specific spec scenarios for traceability.
 - **Archive when done.** Completed changes move to `openspec/changes/archive/` after verification.
 
+## Git Workflow
+
+- **Commit as you go.** Make small, focused commits after each logical unit of work rather than one large commit at the end.
+- **Create a PR when finished.** After all changes are committed and pushed, open a pull request using the `gh` CLI:
+  ```bash
+  gh pr create --title "<title>" --body "<description>"
+  ```
+
 ## Not Supported
 
 Global Secondary Indexes, DynamoDB Streams, TTL, provisioned capacity simulation, PartiQL, backup/restore, global tables.
