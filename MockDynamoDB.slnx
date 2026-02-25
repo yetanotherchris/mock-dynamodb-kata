@@ -4,6 +4,7 @@
     <Project Path="src/MockDynamoDB.Server/MockDynamoDB.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/MockDynamoDB.Tests.Samples/MockDynamoDB.Tests.Samples.csproj" />
     <Project Path="tests/MockDynamoDB.Tests.Spec/MockDynamoDB.Tests.Spec.csproj" />
     <Project Path="tests/MockDynamoDB.Tests.Unit/MockDynamoDB.Tests.Unit.csproj" />
   </Folder>
