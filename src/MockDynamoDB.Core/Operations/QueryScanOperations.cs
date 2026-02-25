@@ -118,7 +118,8 @@ public class QueryScanOperations
         if (projectionExpression != null)
             items = items.Select(item => ItemOperations.ApplyProjection(item, projectionExpression, expressionAttributeNames)).ToList();
 
-        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select, lsiDef);
+        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select, lsiDef,
+            tableName, root.TryGetProperty("ReturnConsumedCapacity", out var rcc) ? rcc.GetString() : null);
     }
 
     public JsonDocument Scan(JsonDocument request)
@@ -337,7 +338,9 @@ public class QueryScanOperations
         List<Dictionary<string, AttributeValue>>? lastPageItems,
         TableDefinition table,
         string? select,
-        LocalSecondaryIndexDefinition? lsiDef = null)
+        LocalSecondaryIndexDefinition? lsiDef = null,
+        string? tableName = null,
+        string? returnConsumedCapacity = null)
     {
         using var stream = new MemoryStream();
         using var writer = new Utf8JsonWriter(stream);
@@ -361,6 +364,16 @@ public class QueryScanOperations
             if (lsiDef != null && lastItem.TryGetValue(lsiDef.RangeKeyName, out var lsiSkVal))
                 lastKey[lsiDef.RangeKeyName] = lsiSkVal;
             ItemOperations.WriteItem(writer, lastKey);
+        }
+
+        // ConsumedCapacity (returned when explicitly requested)
+        if (tableName != null && returnConsumedCapacity is "TOTAL" or "INDEXES")
+        {
+            writer.WritePropertyName("ConsumedCapacity");
+            writer.WriteStartObject();
+            writer.WriteString("TableName", tableName);
+            writer.WriteNumber("CapacityUnits", 1.0);
+            writer.WriteEndObject();
         }
 
         writer.WriteEndObject();
