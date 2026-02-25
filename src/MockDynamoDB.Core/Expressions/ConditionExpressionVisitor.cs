@@ -107,7 +107,7 @@ public class ConditionExpressionVisitor : DynamoDbConditionBaseVisitor<Expressio
         return new FunctionNode(name, args);
     }
 
-    public ExpressionNode VisitOperand(DynamoDbConditionParser.OperandContext context)
+    public override ExpressionNode VisitOperand(DynamoDbConditionParser.OperandContext context)
     {
         if (context.documentPath() != null)
         {
