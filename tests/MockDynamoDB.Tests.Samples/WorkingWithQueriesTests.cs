@@ -13,7 +13,7 @@ public abstract class WorkingWithQueriesTests(IMockBackend backend)
     public async Task SetUp()
     {
         if (!backend.IsAvailable)
-            Skip.Test("Docker unavailable or moto container failed to start");
+            Skip.Test("Moto server not running (start with: docker run -d -p 5000:5000 motoserver/moto:5.1.21)");
 
         await _client.CreateTableAsync(new CreateTableRequest
         {

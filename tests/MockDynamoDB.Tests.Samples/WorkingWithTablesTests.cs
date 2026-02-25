@@ -12,7 +12,7 @@ public abstract class WorkingWithTablesTests(IMockBackend backend)
     public Task SkipIfUnavailable()
     {
         if (!backend.IsAvailable)
-            Skip.Test("Docker unavailable or moto container failed to start");
+            Skip.Test("Moto server not running (start with: docker run -d -p 5000:5000 motoserver/moto:5.1.21)");
         return Task.CompletedTask;
     }
 

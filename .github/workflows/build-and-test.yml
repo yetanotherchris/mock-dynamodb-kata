@@ -41,6 +41,11 @@ jobs:
       - name: Pull Moto Docker image
         run: docker pull motoserver/moto:5.1.21
 
+      - name: Start Moto server
+        run: |
+          docker run -d -p 5000:5000 --name moto motoserver/moto:5.1.21
+          timeout 20 bash -c 'until curl -sf http://localhost:5000/; do sleep 0.5; done'
+
       - name: Run samples tests (parity with Moto)
         run: dotnet test --project tests/MockDynamoDB.Tests.Samples --no-build --configuration Release --verbosity normal
 
