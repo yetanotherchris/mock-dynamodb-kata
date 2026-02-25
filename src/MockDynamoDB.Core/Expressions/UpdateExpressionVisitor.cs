@@ -104,7 +104,7 @@ public class UpdateExpressionVisitor : DynamoDbUpdateBaseVisitor<object>
         return _actions;
     }
 
-    private ExpressionNode VisitOperand(DynamoDbUpdateParser.OperandContext context)
+    private new ExpressionNode VisitOperand(DynamoDbUpdateParser.OperandContext context)
     {
         if (context.documentPath() != null)
         {
