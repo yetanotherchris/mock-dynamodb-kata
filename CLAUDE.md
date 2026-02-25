@@ -123,9 +123,13 @@ When implementing a new feature or modifying behaviour:
 ## Git Workflow
 
 - **Commit as you go.** Make small, focused commits after each logical unit of work rather than one large commit at the end.
-- **Create a PR when finished.** After all changes are committed and pushed, open a pull request using the `gh` CLI:
-  ```bash
-  gh pr create --title "<title>" --body "<description>"
+- **Create a PR when finished.** After all changes are committed and pushed, open a pull request using the `gh` CLI. Always write the body to a temp file using a **single-quoted PowerShell here-string** (`@'...'@`) and `-Encoding utf8NoBOM`, then pass it via `--body-file`. Using `--body` directly or a double-quoted here-string (`@"..."@`) will corrupt backticks and other special characters on Windows.
+  ```powershell
+  $body = @'
+  PR description with `backticks` and **markdown** here.
+  '@
+  $body | Out-File -FilePath "$env:TEMP\pr-body.md" -Encoding utf8NoBOM
+  gh pr create --title "<title>" --body-file "$env:TEMP\pr-body.md"
   ```
 
 ## Not Supported
