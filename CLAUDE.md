@@ -91,12 +91,20 @@ This project uses [OpenSpec](https://github.com/Fission-AI/OpenSpec) for spec-dr
 
 ```
 openspec/
+  constitution.md                 # Non-negotiable project rules
   specs/                          # Requirements (the "what")
-    table-operations/spec.md
-    item-crud/spec.md
-    ...
+    infrastructure/spec.md        # Repo layout, build config, CI/CD, Docker
+    testing/spec.md               # Test projects, fixtures, SDK compat, Moto parity
+    server/spec.md                # HTTP wire protocol, request routing, error format
+    tables/spec.md                # CreateTable, DeleteTable, DescribeTable, ListTables
+    items/spec.md                 # PutItem, GetItem, DeleteItem, UpdateItem
+    queries/spec.md               # Query and Scan operations
+    batch/spec.md                 # BatchGetItem, BatchWriteItem
+    transactions/spec.md          # TransactWriteItems, TransactGetItems
+    expressions/spec.md           # ANTLR4 expression engine
+    indexes/spec.md               # Local Secondary Indexes
   changes/                        # Change proposals (the "how")
-    initial-implementation/       # One folder per logical unit of work
+    <change-name>/                # One folder per logical unit of work
       proposal.md
       design.md
       tasks.md
