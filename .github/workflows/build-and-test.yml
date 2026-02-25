@@ -38,6 +38,12 @@ jobs:
       - name: Run integration tests
         run: dotnet test --project tests/MockDynamoDB.Tests.Spec --no-build --configuration Release --verbosity normal
 
+      - name: Pull Moto Docker image
+        run: docker pull motoserver/moto:5.1.21
+
+      - name: Run samples tests (parity with Moto)
+        run: dotnet test --project tests/MockDynamoDB.Tests.Samples --no-build --configuration Release --verbosity normal
+
       - name: Verify Dockerfile base image tags exist
         run: |
           images=$(grep -E '^FROM ' Dockerfile | awk '{print $2}')
