@@ -6,6 +6,7 @@ public class TableDefinition
     public required List<KeySchemaElement> KeySchema { get; set; }
     public required List<AttributeDefinition> AttributeDefinitions { get; set; }
     public List<LocalSecondaryIndexDefinition>? LocalSecondaryIndexes { get; set; }
+    public List<GlobalSecondaryIndexDefinition>? GlobalSecondaryIndexes { get; set; }
     public string TableStatus { get; set; } = "ACTIVE";
     public DateTime CreationDateTime { get; set; } = DateTime.UtcNow;
     public string TableId { get; set; } = Guid.NewGuid().ToString();
@@ -40,6 +41,16 @@ public class LocalSecondaryIndexDefinition
 
     public string HashKeyName => KeySchema.First(k => k.KeyType == "HASH").AttributeName;
     public string RangeKeyName => KeySchema.First(k => k.KeyType == "RANGE").AttributeName;
+}
+
+public class GlobalSecondaryIndexDefinition
+{
+    public required string IndexName { get; set; }
+    public required List<KeySchemaElement> KeySchema { get; set; }
+    public required ProjectionDefinition Projection { get; set; }
+
+    public string HashKeyName => KeySchema.First(k => k.KeyType == "HASH").AttributeName;
+    public string? RangeKeyName => KeySchema.FirstOrDefault(k => k.KeyType == "RANGE")?.AttributeName;
 }
 
 public class ProjectionDefinition

@@ -63,7 +63,7 @@ docker run -p 8000:8000 mock-dynamodb
 
 CreateTable, DeleteTable, DescribeTable, ListTables, PutItem, GetItem, DeleteItem, UpdateItem, Query, Scan, BatchGetItem, BatchWriteItem, TransactWriteItems, TransactGetItems
 
-Local Secondary Indexes are supported on Query.
+Local Secondary Indexes (LSI) and Global Secondary Indexes (GSI) are supported on Query.
 
 ## Architecture Notes
 
@@ -102,7 +102,7 @@ openspec/
     batch/spec.md                 # BatchGetItem, BatchWriteItem
     transactions/spec.md          # TransactWriteItems, TransactGetItems
     expressions/spec.md           # ANTLR4 expression engine
-    indexes/spec.md               # Local Secondary Indexes
+    indexes/spec.md               # Local Secondary Indexes and Global Secondary Indexes
   changes/                        # Change proposals (the "how")
     <change-name>/                # One folder per logical unit of work
       proposal.md
@@ -110,6 +110,15 @@ openspec/
       tasks.md
     archive/                      # Completed changes (after /opsx:archive)
 ```
+
+### Handling Feature Requests
+
+When a user asks for a new feature or behavioural change **and no change proposal already exists**, do not implement immediately. Instead:
+
+1. Ask the user to switch to plan mode (Shift+Tab in Copilot CLI) so the proposal and spec can be written first.
+2. Only proceed with implementation once a change proposal exists under `openspec/changes/<change-name>/` with a `tasks.md` to work from.
+
+If a change proposal already exists with a `tasks.md`, implementation can begin directly in a normal session.
 
 ### Creating a Change
 

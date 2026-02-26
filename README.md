@@ -22,7 +22,7 @@ Configure the AWS SDK to point at `http://localhost:8000` with any credentials.
 
 CreateTable, DeleteTable, DescribeTable, ListTables, PutItem, GetItem, DeleteItem, UpdateItem, Query, Scan, BatchGetItem, BatchWriteItem, TransactWriteItems, TransactGetItems
 
-Local Secondary Indexes are supported on Query.
+Local Secondary Indexes (LSI) and Global Secondary Indexes (GSI) are supported on Query.
 
 ## Spec-Driven Development
 

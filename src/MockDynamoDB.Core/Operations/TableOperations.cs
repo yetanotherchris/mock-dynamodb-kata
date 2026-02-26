@@ -37,6 +37,11 @@ public class TableOperations
             table.LocalSecondaryIndexes = ParseLocalSecondaryIndexes(lsiProp, table.HashKeyName, attrDefs);
         }
 
+        if (root.TryGetProperty("GlobalSecondaryIndexes", out var gsiProp))
+        {
+            table.GlobalSecondaryIndexes = ParseGlobalSecondaryIndexes(gsiProp, attrDefs);
+        }
+
         _tableStore.CreateTable(table);
         _itemStore.EnsureTable(tableName);
 
@@ -167,6 +172,44 @@ public class TableOperations
         return indexes;
     }
 
+    private static List<GlobalSecondaryIndexDefinition> ParseGlobalSecondaryIndexes(
+        JsonElement element, List<AttributeDefinition> attrDefs)
+    {
+        var indexes = new List<GlobalSecondaryIndexDefinition>();
+
+        foreach (var item in element.EnumerateArray())
+        {
+            var indexName = item.GetProperty("IndexName").GetString()!;
+            var keySchema = ParseKeySchema(item.GetProperty("KeySchema"));
+            var projection = ParseProjection(item.GetProperty("Projection"));
+
+            var hashKey = keySchema.FirstOrDefault(k => k.KeyType == "HASH");
+            if (hashKey == null)
+                throw new ValidationException($"Global Secondary Index {indexName} must have a HASH key");
+
+            if (!attrDefs.Any(a => a.AttributeName == hashKey.AttributeName))
+                throw new ValidationException(
+                    "One or more parameter values were invalid: Some index key attributes are not defined in AttributeDefinitions.");
+
+            var rangeKey = keySchema.FirstOrDefault(k => k.KeyType == "RANGE");
+            if (rangeKey != null && !attrDefs.Any(a => a.AttributeName == rangeKey.AttributeName))
+                throw new ValidationException(
+                    "One or more parameter values were invalid: Some index key attributes are not defined in AttributeDefinitions.");
+
+            indexes.Add(new GlobalSecondaryIndexDefinition
+            {
+                IndexName = indexName,
+                KeySchema = keySchema,
+                Projection = projection
+            });
+        }
+
+        if (indexes.Count > 20)
+            throw new ValidationException("One or more parameter values were invalid: Number of global secondary indexes exceeds limit of 20");
+
+        return indexes;
+    }
+
     private static ProjectionDefinition ParseProjection(JsonElement element)
     {
         var projection = new ProjectionDefinition();
@@ -278,6 +321,48 @@ public class TableOperations
                     writer.WritePropertyName("NonKeyAttributes");
                     writer.WriteStartArray();
                     foreach (var attr in lsi.Projection.NonKeyAttributes)
+                        writer.WriteStringValue(attr);
+                    writer.WriteEndArray();
+                }
+                writer.WriteEndObject();
+
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+        }
+
+        if (table.GlobalSecondaryIndexes != null && table.GlobalSecondaryIndexes.Count > 0)
+        {
+            writer.WritePropertyName("GlobalSecondaryIndexes");
+            writer.WriteStartArray();
+            foreach (var gsi in table.GlobalSecondaryIndexes)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("IndexName", gsi.IndexName);
+                writer.WriteString("IndexArn", $"{table.TableArn}/index/{gsi.IndexName}");
+                writer.WriteString("IndexStatus", "ACTIVE");
+                writer.WriteNumber("IndexSizeBytes", 0);
+                writer.WriteNumber("ItemCount", 0);
+
+                writer.WritePropertyName("KeySchema");
+                writer.WriteStartArray();
+                foreach (var key in gsi.KeySchema)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("AttributeName", key.AttributeName);
+                    writer.WriteString("KeyType", key.KeyType);
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+
+                writer.WritePropertyName("Projection");
+                writer.WriteStartObject();
+                writer.WriteString("ProjectionType", gsi.Projection.ProjectionType);
+                if (gsi.Projection.NonKeyAttributes != null)
+                {
+                    writer.WritePropertyName("NonKeyAttributes");
+                    writer.WriteStartArray();
+                    foreach (var attr in gsi.Projection.NonKeyAttributes)
                         writer.WriteStringValue(attr);
                     writer.WriteEndArray();
                 }
