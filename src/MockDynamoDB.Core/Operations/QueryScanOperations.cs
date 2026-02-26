@@ -24,16 +24,20 @@ public class QueryScanOperations
 
         // Check for index query
         LocalSecondaryIndexDefinition? lsiDef = null;
+        GlobalSecondaryIndexDefinition? gsiDef = null;
         string? indexName = null;
         if (root.TryGetProperty("IndexName", out var idx))
         {
             indexName = idx.GetString();
             lsiDef = table.LocalSecondaryIndexes?.FirstOrDefault(l => l.IndexName == indexName);
             if (lsiDef == null)
+                gsiDef = table.GlobalSecondaryIndexes?.FirstOrDefault(g => g.IndexName == indexName);
+            if (lsiDef == null && gsiDef == null)
                 throw new ValidationException($"The table does not have the specified index: {indexName}");
         }
 
-        var effectiveRangeKeyName = lsiDef?.RangeKeyName ?? table.RangeKeyName;
+        var effectiveHashKeyName = gsiDef?.HashKeyName ?? table.HashKeyName;
+        var effectiveRangeKeyName = lsiDef?.RangeKeyName ?? gsiDef?.RangeKeyName ?? table.RangeKeyName;
 
         var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
             ? ItemOperations.DeserializeStringMap(ean) : null;
@@ -45,7 +49,7 @@ public class QueryScanOperations
             throw new ValidationException("Either the KeyConditions or KeyConditionExpression parameter must be specified");
 
         var keyCondition = kce.GetString()!;
-        var (pkValue, skCondition) = ParseKeyCondition(keyCondition, expressionAttributeNames, expressionAttributeValues, table.HashKeyName, effectiveRangeKeyName);
+        var (pkValue, skCondition) = ParseKeyCondition(keyCondition, expressionAttributeNames, expressionAttributeValues, effectiveHashKeyName, effectiveRangeKeyName);
 
         // Get items by partition key
         List<Dictionary<string, AttributeValue>> items;
@@ -118,7 +122,7 @@ public class QueryScanOperations
         if (projectionExpression != null)
             items = items.Select(item => ItemOperations.ApplyProjection(item, projectionExpression, expressionAttributeNames)).ToList();
 
-        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select, lsiDef,
+        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select, lsiDef, gsiDef,
             tableName, root.TryGetProperty("ReturnConsumedCapacity", out var rcc) ? rcc.GetString() : null);
     }
 
@@ -339,6 +343,7 @@ public class QueryScanOperations
         TableDefinition table,
         string? select,
         LocalSecondaryIndexDefinition? lsiDef = null,
+        GlobalSecondaryIndexDefinition? gsiDef = null,
         string? tableName = null,
         string? returnConsumedCapacity = null)
     {
@@ -363,6 +368,13 @@ public class QueryScanOperations
             var lastKey = ItemOperations.ExtractKey(lastItem, table);
             if (lsiDef != null && lastItem.TryGetValue(lsiDef.RangeKeyName, out var lsiSkVal))
                 lastKey[lsiDef.RangeKeyName] = lsiSkVal;
+            if (gsiDef != null)
+            {
+                if (lastItem.TryGetValue(gsiDef.HashKeyName, out var gsiHkVal))
+                    lastKey[gsiDef.HashKeyName] = gsiHkVal;
+                if (gsiDef.RangeKeyName != null && lastItem.TryGetValue(gsiDef.RangeKeyName, out var gsiSkVal))
+                    lastKey[gsiDef.RangeKeyName] = gsiSkVal;
+            }
             ItemOperations.WriteItem(writer, lastKey);
         }
 

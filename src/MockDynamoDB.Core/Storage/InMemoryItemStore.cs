@@ -46,6 +46,12 @@ public class InMemoryItemStore : IItemStore
                 UpdateLsiOnPut(data, lsi, pkValue, skValue, oldItem, item);
         }
 
+        if (table.GlobalSecondaryIndexes is { Count: > 0 })
+        {
+            foreach (var gsi in table.GlobalSecondaryIndexes)
+                UpdateGsiOnPut(data, gsi, pkValue, skValue, oldItem, item);
+        }
+
         UpdateTableMetrics(tableName);
     }
 
@@ -91,6 +97,12 @@ public class InMemoryItemStore : IItemStore
         {
             foreach (var lsi in table.LocalSecondaryIndexes)
                 RemoveFromLsiIndex(data, lsi, pkValue, skValue, existing);
+        }
+
+        if (table.GlobalSecondaryIndexes is { Count: > 0 })
+        {
+            foreach (var gsi in table.GlobalSecondaryIndexes)
+                RemoveFromGsiIndex(data, gsi, pkValue, skValue, existing);
         }
 
         UpdateTableMetrics(tableName);
@@ -275,6 +287,88 @@ public class InMemoryItemStore : IItemStore
                 partition.Remove(compositeKey);
                 if (partition.Count == 0)
                     indexData.TryRemove(pkString, out _);
+            }
+        }
+    }
+
+    private void UpdateGsiOnPut(
+        TableData data,
+        GlobalSecondaryIndexDefinition gsi,
+        string tablePkString,
+        string tableSkString,
+        Dictionary<string, AttributeValue>? oldItem,
+        Dictionary<string, AttributeValue> newItem)
+    {
+        var gsiHashKeyName = gsi.HashKeyName;
+        var gsiSkName = gsi.RangeKeyName;
+
+        var indexData = data.Indexes.GetOrAdd(gsi.IndexName,
+            _ => new ConcurrentDictionary<string, SortedList<string, Dictionary<string, AttributeValue>>>());
+
+        // Remove old entry
+        if (oldItem != null && oldItem.TryGetValue(gsiHashKeyName, out var oldGsiHashKey))
+        {
+            var oldGsiPkString = GetAttributeKeyString(oldGsiHashKey);
+            var oldCompositeKey = BuildGsiCompositeKey(oldItem, gsiSkName, tablePkString, tableSkString);
+            if (indexData.TryGetValue(oldGsiPkString, out var oldPartition))
+            {
+                lock (oldPartition)
+                {
+                    oldPartition.Remove(oldCompositeKey);
+                    if (oldPartition.Count == 0)
+                        indexData.TryRemove(oldGsiPkString, out _);
+                }
+            }
+        }
+
+        // Add new entry (only if item has the GSI hash key)
+        if (newItem.TryGetValue(gsiHashKeyName, out var newGsiHashKey))
+        {
+            var gsiPkString = GetAttributeKeyString(newGsiHashKey);
+            var compositeKey = BuildGsiCompositeKey(newItem, gsiSkName, tablePkString, tableSkString);
+            var partition = indexData.GetOrAdd(gsiPkString,
+                _ => new SortedList<string, Dictionary<string, AttributeValue>>(StringComparer.Ordinal));
+            lock (partition)
+            {
+                partition[compositeKey] = CloneItem(newItem);
+            }
+        }
+    }
+
+    private static string BuildGsiCompositeKey(
+        Dictionary<string, AttributeValue> item,
+        string? gsiSkName,
+        string tablePkString,
+        string tableSkString)
+    {
+        // Include table primary key to guarantee uniqueness within a GSI partition
+        if (gsiSkName != null && item.TryGetValue(gsiSkName, out var gsiSk))
+            return GetAttributeKeyString(gsiSk) + "\0" + tablePkString + "\0" + tableSkString;
+        return tablePkString + "\0" + tableSkString;
+    }
+
+    private void RemoveFromGsiIndex(
+        TableData data,
+        GlobalSecondaryIndexDefinition gsi,
+        string tablePkString,
+        string tableSkString,
+        Dictionary<string, AttributeValue> item)
+    {
+        if (!item.TryGetValue(gsi.HashKeyName, out var gsiHashKey))
+            return;
+
+        if (!data.Indexes.TryGetValue(gsi.IndexName, out var indexData))
+            return;
+
+        var gsiPkString = GetAttributeKeyString(gsiHashKey);
+        var compositeKey = BuildGsiCompositeKey(item, gsi.RangeKeyName, tablePkString, tableSkString);
+        if (indexData.TryGetValue(gsiPkString, out var partition))
+        {
+            lock (partition)
+            {
+                partition.Remove(compositeKey);
+                if (partition.Count == 0)
+                    indexData.TryRemove(gsiPkString, out _);
             }
         }
     }
