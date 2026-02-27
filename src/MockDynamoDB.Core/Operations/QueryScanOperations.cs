@@ -44,12 +44,22 @@ public class QueryScanOperations
         var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
             ? ItemOperations.DeserializeItem(eav) : null;
 
-        // Parse KeyConditionExpression
-        if (!root.TryGetProperty("KeyConditionExpression", out var kce))
-            throw new ValidationException("Either the KeyConditions or KeyConditionExpression parameter must be specified");
+        // Parse KeyConditionExpression (expression format) or KeyConditions (pre-expression format)
+        AttributeValue pkValue;
+        SortKeyCondition? skCondition;
 
-        var keyCondition = kce.GetString()!;
-        var (pkValue, skCondition) = ParseKeyCondition(keyCondition, expressionAttributeNames, expressionAttributeValues, effectiveHashKeyName, effectiveRangeKeyName);
+        if (root.TryGetProperty("KeyConditionExpression", out var kce))
+        {
+            (pkValue, skCondition) = ParseKeyCondition(kce.GetString()!, expressionAttributeNames, expressionAttributeValues, effectiveHashKeyName, effectiveRangeKeyName);
+        }
+        else if (root.TryGetProperty("KeyConditions", out var keyConditions))
+        {
+            (pkValue, skCondition) = PreExpressionRequestParser.ParseKeyConditions(keyConditions, effectiveHashKeyName, effectiveRangeKeyName);
+        }
+        else
+        {
+            throw new ValidationException("Either the KeyConditions or KeyConditionExpression parameter must be specified");
+        }
 
         // Get items by partition key
         List<Dictionary<string, AttributeValue>> items;
@@ -101,12 +111,18 @@ public class QueryScanOperations
         }
         scannedCount = items.Count;
 
-        // FilterExpression
+        // FilterExpression (expression format) or QueryFilter (pre-expression format)
         if (root.TryGetProperty("FilterExpression", out var fe))
         {
             var ast = DynamoDbExpressionParser.ParseCondition(fe.GetString()!, expressionAttributeNames);
             var evaluator = new ConditionEvaluator(expressionAttributeValues);
             items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
+        }
+        else if (root.TryGetProperty("QueryFilter", out var qf))
+        {
+            bool useOr = root.TryGetProperty("ConditionalOperator", out var co) && co.GetString() == "OR";
+            var predicate = PreExpressionRequestParser.ParseFilterConditions(qf, useOr);
+            items = items.Where(predicate).ToList();
         }
 
         // Select = COUNT
@@ -176,12 +192,18 @@ public class QueryScanOperations
         }
         int scannedCount = items.Count;
 
-        // FilterExpression
+        // FilterExpression (expression format) or ScanFilter (pre-expression format)
         if (root.TryGetProperty("FilterExpression", out var fe))
         {
             var ast = DynamoDbExpressionParser.ParseCondition(fe.GetString()!, expressionAttributeNames);
             var evaluator = new ConditionEvaluator(expressionAttributeValues);
             items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
+        }
+        else if (root.TryGetProperty("ScanFilter", out var sf))
+        {
+            bool useOr = root.TryGetProperty("ConditionalOperator", out var co) && co.GetString() == "OR";
+            var predicate = PreExpressionRequestParser.ParseFilterConditions(sf, useOr);
+            items = items.Where(predicate).ToList();
         }
 
         // Select
@@ -404,12 +426,5 @@ public class QueryScanOperations
             hash *= fnvPrime;
         }
         return hash;
-    }
-
-    private class SortKeyCondition
-    {
-        public string Operator { get; set; } = "";
-        public AttributeValue? Value { get; set; }
-        public AttributeValue? Value2 { get; set; } // for BETWEEN
     }
 }
