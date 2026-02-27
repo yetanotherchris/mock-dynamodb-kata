@@ -118,7 +118,7 @@ public class ItemOperations
         }
 
         // Capture old values for UPDATED_OLD
-        var oldItem = existingItem != null ? CloneItem(existingItem) : null;
+        var oldItem = existingItem != null ? existingItem.CloneItem() : null;
 
         // UpdateExpression (expression format) or AttributeUpdates (pre-expression format)
         if (root.TryGetProperty("UpdateExpression", out var ue))
@@ -143,7 +143,7 @@ public class ItemOperations
         Dictionary<string, AttributeValue>? returnItem = returnValues switch
         {
             "ALL_OLD" => oldItem,
-            "ALL_NEW" => CloneItem(item),
+            "ALL_NEW" => item.CloneItem(),
             "UPDATED_OLD" => GetUpdatedAttributes(oldItem, item, returnOld: true),
             "UPDATED_NEW" => GetUpdatedAttributes(oldItem, item, returnOld: false),
             _ => null
@@ -176,7 +176,7 @@ public class ItemOperations
         bool returnOld)
     {
         if (oldItem == null)
-            return returnOld ? null : CloneItem(newItem);
+            return returnOld ? null : newItem.CloneItem();
 
         var result = new Dictionary<string, AttributeValue>();
         var allKeys = new HashSet<string>(oldItem.Keys);
@@ -372,8 +372,4 @@ public class ItemOperations
         writer.WriteEndArray();
     }
 
-    private static Dictionary<string, AttributeValue> CloneItem(Dictionary<string, AttributeValue> item)
-    {
-        return item.ToDictionary(kv => kv.Key, kv => kv.Value.DeepClone());
-    }
 }

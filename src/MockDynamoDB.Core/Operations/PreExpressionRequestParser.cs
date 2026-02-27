@@ -232,7 +232,6 @@ internal static class PreExpressionRequestParser
         foreach (var prop in expected.EnumerateObject())
         {
             var attrName = prop.Name;
-            existingItem?.TryGetValue(attrName, out var actualVal);
             AttributeValue? resolvedVal = existingItem != null && existingItem.TryGetValue(attrName, out var av) ? av : null;
 
             bool result;

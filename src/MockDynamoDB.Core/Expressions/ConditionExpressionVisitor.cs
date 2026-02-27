@@ -132,30 +132,6 @@ public class ConditionExpressionVisitor : DynamoDbConditionBaseVisitor<Expressio
         DynamoDbConditionParser.DocumentPathContext context,
         Dictionary<string, string>? expressionAttributeNames)
     {
-        var elements = new List<PathElement>();
-
-        foreach (var pathElement in context.pathElement())
-        {
-            if (pathElement.NAME_PLACEHOLDER() != null)
-            {
-                var placeholder = pathElement.NAME_PLACEHOLDER().GetText();
-                var name = DocumentPath.ResolveName(placeholder, expressionAttributeNames);
-                elements.Add(new AttributeElement(name));
-            }
-            else
-            {
-                elements.Add(new AttributeElement(pathElement.IDENTIFIER().GetText()));
-            }
-        }
-
-        // Handle list indexes [N]
-        foreach (var numberToken in context.NUMBER())
-        {
-            elements.Add(new IndexElement(int.Parse(numberToken.GetText())));
-        }
-
-        // The above approach is too simplistic for interleaved dots and brackets.
-        // We need to walk children in order to correctly interleave attributes and indexes.
         return BuildDocumentPathFromChildren(context, expressionAttributeNames);
     }
 
