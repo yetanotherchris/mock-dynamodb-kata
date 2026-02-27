@@ -31,6 +31,40 @@ This format is recommended for all new code. It supports nested attribute paths,
 name aliasing (`ExpressionAttributeNames`), and the full expression function library
 (`begins_with`, `contains`, `attribute_exists`, `size`, etc.).
 
+#### Nested attribute paths
+
+The expression format can target attributes inside maps and lists using dot notation
+and index syntax:
+
+```json
+{ "FilterExpression": "address.city = :city" }
+{ "FilterExpression": "tags[0] = :firstTag" }
+{ "UpdateExpression": "SET metadata.updatedAt = :ts" }
+```
+
+This is impossible with the pre-expression format, which can only address top-level
+attribute names.
+
+#### Name aliasing (`ExpressionAttributeNames`)
+
+DynamoDB reserves certain words as keywords (`name`, `status`, `size`, `count`,
+`timestamp`, `type`, etc.). If a table's attribute shares a name with a reserved word,
+a bare expression like `"FilterExpression": "status = :s"` will fail with a
+`ValidationException`. Aliasing solves this:
+
+```json
+{
+  "FilterExpression": "#s = :s",
+  "ExpressionAttributeNames": { "#s": "status" }
+}
+```
+
+Aliasing is also useful when attribute names contain characters that would be
+ambiguous in an expression string (dots, brackets, spaces).
+
+The pre-expression format uses plain attribute names as map keys, so it has no
+mechanism to handle reserved words or special characters.
+
 ### Pre-Expression Format (original API, pre-2014)
 
 The original API uses structured comparison objects — a map of attribute name to a
