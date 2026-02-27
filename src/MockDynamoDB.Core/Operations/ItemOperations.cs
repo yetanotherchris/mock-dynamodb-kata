@@ -208,10 +208,13 @@ public class ItemOperations
         var item = new Dictionary<string, AttributeValue>();
         foreach (var prop in element.EnumerateObject())
         {
-            item[prop.Name] = JsonSerializer.Deserialize<AttributeValue>(prop.Value.GetRawText(), JsonOptions)!;
+            item[prop.Name] = DeserializeAttributeValue(prop.Value);
         }
         return item;
     }
+
+    internal static AttributeValue DeserializeAttributeValue(JsonElement element) =>
+        JsonSerializer.Deserialize<AttributeValue>(element.GetRawText(), JsonOptions)!;
 
     internal static Dictionary<string, string> DeserializeStringMap(JsonElement element)
     {

@@ -44,12 +44,22 @@ public class QueryScanOperations
         var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
             ? ItemOperations.DeserializeItem(eav) : null;
 
-        // Parse KeyConditionExpression
-        if (!root.TryGetProperty("KeyConditionExpression", out var kce))
-            throw new ValidationException("Either the KeyConditions or KeyConditionExpression parameter must be specified");
+        // Parse KeyConditionExpression or legacy KeyConditions
+        AttributeValue pkValue;
+        SortKeyCondition? skCondition;
 
-        var keyCondition = kce.GetString()!;
-        var (pkValue, skCondition) = ParseKeyCondition(keyCondition, expressionAttributeNames, expressionAttributeValues, effectiveHashKeyName, effectiveRangeKeyName);
+        if (root.TryGetProperty("KeyConditionExpression", out var kce))
+        {
+            (pkValue, skCondition) = ParseKeyCondition(kce.GetString()!, expressionAttributeNames, expressionAttributeValues, effectiveHashKeyName, effectiveRangeKeyName);
+        }
+        else if (root.TryGetProperty("KeyConditions", out var keyConditions))
+        {
+            (pkValue, skCondition) = ParseLegacyKeyConditions(keyConditions, effectiveHashKeyName, effectiveRangeKeyName);
+        }
+        else
+        {
+            throw new ValidationException("Either the KeyConditions or KeyConditionExpression parameter must be specified");
+        }
 
         // Get items by partition key
         List<Dictionary<string, AttributeValue>> items;
@@ -198,6 +208,55 @@ public class QueryScanOperations
             items = items.Select(item => ItemOperations.ApplyProjection(item, projectionExpression, expressionAttributeNames)).ToList();
 
         return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select);
+    }
+
+    private (AttributeValue pkValue, SortKeyCondition? skCondition) ParseLegacyKeyConditions(
+        JsonElement keyConditions,
+        string hashKeyName,
+        string? rangeKeyName)
+    {
+        AttributeValue? pkValue = null;
+        SortKeyCondition? skCondition = null;
+
+        foreach (var prop in keyConditions.EnumerateObject())
+        {
+            var attrName = prop.Name;
+            var condition = prop.Value;
+            var op = condition.GetProperty("ComparisonOperator").GetString()!;
+            var valueList = condition.GetProperty("AttributeValueList");
+            var firstValue = ItemOperations.DeserializeAttributeValue(valueList[0]);
+
+            if (attrName == hashKeyName)
+            {
+                if (op != "EQ")
+                    throw new ValidationException("Query key condition not supported");
+                pkValue = firstValue;
+            }
+            else if (attrName == rangeKeyName)
+            {
+                skCondition = op switch
+                {
+                    "EQ" => new SortKeyCondition { Operator = "=", Value = firstValue },
+                    "LE" => new SortKeyCondition { Operator = "<=", Value = firstValue },
+                    "LT" => new SortKeyCondition { Operator = "<", Value = firstValue },
+                    "GE" => new SortKeyCondition { Operator = ">=", Value = firstValue },
+                    "GT" => new SortKeyCondition { Operator = ">", Value = firstValue },
+                    "BEGINS_WITH" => new SortKeyCondition { Operator = "begins_with", Value = firstValue },
+                    "BETWEEN" => new SortKeyCondition
+                    {
+                        Operator = "BETWEEN",
+                        Value = firstValue,
+                        Value2 = ItemOperations.DeserializeAttributeValue(valueList[1])
+                    },
+                    _ => throw new ValidationException($"Unsupported ComparisonOperator: {op}")
+                };
+            }
+        }
+
+        if (pkValue == null)
+            throw new ValidationException("Query condition missed key schema element: " + hashKeyName);
+
+        return (pkValue, skCondition);
     }
 
     private (AttributeValue pkValue, SortKeyCondition? skCondition) ParseKeyCondition(
