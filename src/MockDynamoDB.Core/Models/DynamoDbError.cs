@@ -52,16 +52,16 @@ public class TransactionCanceledException : DynamoDbException
     }
 }
 
-public class CancellationReason
+public sealed record CancellationReason
 {
     [JsonPropertyName("Code")]
-    public string? Code { get; set; }
+    public string? Code { get; init; }
 
     [JsonPropertyName("Message")]
-    public string? Message { get; set; }
+    public string? Message { get; init; }
 
     [JsonPropertyName("Item")]
-    public Dictionary<string, AttributeValue>? Item { get; set; }
+    public Dictionary<string, AttributeValue>? Item { get; init; }
 }
 
 public class UnknownOperationException : DynamoDbException

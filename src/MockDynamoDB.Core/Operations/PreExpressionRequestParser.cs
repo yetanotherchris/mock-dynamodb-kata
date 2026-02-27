@@ -337,9 +337,9 @@ internal static class PreExpressionRequestParser
 /// Represents a sort key condition extracted from either KeyConditionExpression or
 /// the pre-expression KeyConditions format.
 /// </summary>
-internal class SortKeyCondition
+internal sealed record SortKeyCondition
 {
-    public string Operator { get; set; } = "";
-    public AttributeValue? Value  { get; set; }
-    public AttributeValue? Value2 { get; set; } // BETWEEN only
+    public required string Operator { get; init; }
+    public AttributeValue? Value  { get; init; }
+    public AttributeValue? Value2 { get; init; } // BETWEEN only
 }

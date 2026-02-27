@@ -212,12 +212,13 @@ public class TableOperations
 
     private static ProjectionDefinition ParseProjection(JsonElement element)
     {
-        var projection = new ProjectionDefinition();
-        if (element.TryGetProperty("ProjectionType", out var pt))
-            projection.ProjectionType = pt.GetString()!;
-        if (element.TryGetProperty("NonKeyAttributes", out var nka))
-            projection.NonKeyAttributes = nka.EnumerateArray().Select(e => e.GetString()!).ToList();
-        return projection;
+        return new ProjectionDefinition
+        {
+            ProjectionType = element.TryGetProperty("ProjectionType", out var pt) ? pt.GetString()! : "ALL",
+            NonKeyAttributes = element.TryGetProperty("NonKeyAttributes", out var nka)
+                ? nka.EnumerateArray().Select(e => e.GetString()!).ToList()
+                : null
+        };
     }
 
     private static void ValidateKeySchemaAttributes(List<KeySchemaElement> keySchema, List<AttributeDefinition> attrDefs)

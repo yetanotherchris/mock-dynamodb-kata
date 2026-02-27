@@ -1,118 +1,38 @@
 namespace MockDynamoDB.Core.Expressions;
 
-public abstract class ExpressionNode { }
+public abstract record ExpressionNode;
 
 // Comparison: path op value, value op path, etc.
-public class ComparisonNode : ExpressionNode
-{
-    public ExpressionNode Left { get; }
-    public string Operator { get; }
-    public ExpressionNode Right { get; }
-
-    public ComparisonNode(ExpressionNode left, string op, ExpressionNode right)
-    {
-        Left = left;
-        Operator = op;
-        Right = right;
-    }
-}
+public sealed record ComparisonNode(ExpressionNode Left, string Operator, ExpressionNode Right) : ExpressionNode;
 
 // AND / OR
-public class LogicalNode : ExpressionNode
-{
-    public ExpressionNode Left { get; }
-    public string Operator { get; } // AND, OR
-    public ExpressionNode Right { get; }
-
-    public LogicalNode(ExpressionNode left, string op, ExpressionNode right)
-    {
-        Left = left;
-        Operator = op;
-        Right = right;
-    }
-}
+public sealed record LogicalNode(ExpressionNode Left, string Operator, ExpressionNode Right) : ExpressionNode;
 
 // NOT
-public class NotNode : ExpressionNode
-{
-    public ExpressionNode Operand { get; }
-    public NotNode(ExpressionNode operand) { Operand = operand; }
-}
+public sealed record NotNode(ExpressionNode Operand) : ExpressionNode;
 
 // BETWEEN
-public class BetweenNode : ExpressionNode
-{
-    public ExpressionNode Value { get; }
-    public ExpressionNode Low { get; }
-    public ExpressionNode High { get; }
-
-    public BetweenNode(ExpressionNode value, ExpressionNode low, ExpressionNode high)
-    {
-        Value = value;
-        Low = low;
-        High = high;
-    }
-}
+public sealed record BetweenNode(ExpressionNode Value, ExpressionNode Low, ExpressionNode High) : ExpressionNode;
 
 // IN
-public class InNode : ExpressionNode
-{
-    public ExpressionNode Value { get; }
-    public List<ExpressionNode> List { get; }
-
-    public InNode(ExpressionNode value, List<ExpressionNode> list)
-    {
-        Value = value;
-        List = list;
-    }
-}
+public sealed record InNode(ExpressionNode Value, List<ExpressionNode> List) : ExpressionNode;
 
 // Function call: attribute_exists, begins_with, contains, size, etc.
-public class FunctionNode : ExpressionNode
-{
-    public string FunctionName { get; }
-    public List<ExpressionNode> Arguments { get; }
-
-    public FunctionNode(string functionName, List<ExpressionNode> arguments)
-    {
-        FunctionName = functionName;
-        Arguments = arguments;
-    }
-}
+public sealed record FunctionNode(string FunctionName, List<ExpressionNode> Arguments) : ExpressionNode;
 
 // Document path reference
-public class PathNode : ExpressionNode
-{
-    public DocumentPath Path { get; }
-    public PathNode(DocumentPath path) { Path = path; }
-}
+public sealed record PathNode(DocumentPath Path) : ExpressionNode;
 
 // Value placeholder (:val)
-public class ValuePlaceholderNode : ExpressionNode
-{
-    public string Placeholder { get; }
-    public ValuePlaceholderNode(string placeholder) { Placeholder = placeholder; }
-}
+public sealed record ValuePlaceholderNode(string Placeholder) : ExpressionNode;
 
 // Arithmetic: path + :val, path - :val
-public class ArithmeticNode : ExpressionNode
-{
-    public ExpressionNode Left { get; }
-    public string Operator { get; } // +, -
-    public ExpressionNode Right { get; }
-
-    public ArithmeticNode(ExpressionNode left, string op, ExpressionNode right)
-    {
-        Left = left;
-        Operator = op;
-        Right = right;
-    }
-}
+public sealed record ArithmeticNode(ExpressionNode Left, string Operator, ExpressionNode Right) : ExpressionNode;
 
 // Update action for SET, REMOVE, ADD, DELETE clauses
-public class UpdateAction
+public sealed record UpdateAction
 {
-    public string Type { get; set; } = ""; // SET, REMOVE, ADD, DELETE
-    public DocumentPath Path { get; set; } = null!;
-    public ExpressionNode? Value { get; set; }
+    public required string Type { get; init; }
+    public required DocumentPath Path { get; init; }
+    public ExpressionNode? Value { get; init; }
 }
