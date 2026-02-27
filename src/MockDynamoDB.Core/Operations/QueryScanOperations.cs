@@ -7,43 +7,36 @@ namespace MockDynamoDB.Core.Operations;
 
 public sealed class QueryScanOperations(ITableStore tableStore, IItemStore itemStore)
 {
-    public JsonDocument Query(JsonDocument request)
+    public QueryResponse Query(QueryRequest request)
     {
-        var root = request.RootElement;
-        var tableName = root.GetProperty("TableName").GetString()!;
-        var table = tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(request.TableName);
 
         // Check for index query
         LocalSecondaryIndexDefinition? lsiDef = null;
         GlobalSecondaryIndexDefinition? gsiDef = null;
-        string? indexName = null;
-        if (root.TryGetProperty("IndexName", out var idx))
+        if (request.IndexName != null)
         {
-            indexName = idx.GetString();
-            lsiDef = table.LocalSecondaryIndexes?.FirstOrDefault(l => l.IndexName == indexName);
+            lsiDef = table.LocalSecondaryIndexes?.FirstOrDefault(l => l.IndexName == request.IndexName);
             if (lsiDef == null)
-                gsiDef = table.GlobalSecondaryIndexes?.FirstOrDefault(g => g.IndexName == indexName);
+                gsiDef = table.GlobalSecondaryIndexes?.FirstOrDefault(g => g.IndexName == request.IndexName);
             if (lsiDef == null && gsiDef == null)
-                throw new ValidationException($"The table does not have the specified index: {indexName}");
+                throw new ValidationException($"The table does not have the specified index: {request.IndexName}");
         }
 
         var effectiveHashKeyName = gsiDef?.HashKeyName ?? table.HashKeyName;
         var effectiveRangeKeyName = lsiDef?.RangeKeyName ?? gsiDef?.RangeKeyName ?? table.RangeKeyName;
 
-        var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
-            ? ItemOperations.DeserializeStringMap(ean) : null;
-        var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
-            ? ItemOperations.DeserializeItem(eav) : null;
-
         // Parse KeyConditionExpression (expression format) or KeyConditions (pre-expression format)
         AttributeValue pkValue;
         SortKeyCondition? skCondition;
 
-        if (root.TryGetProperty("KeyConditionExpression", out var kce))
+        if (request.KeyConditionExpression != null)
         {
-            (pkValue, skCondition) = ParseKeyCondition(kce.GetString()!, expressionAttributeNames, expressionAttributeValues, effectiveHashKeyName, effectiveRangeKeyName);
+            (pkValue, skCondition) = ParseKeyCondition(request.KeyConditionExpression,
+                request.ExpressionAttributeNames, request.ExpressionAttributeValues,
+                effectiveHashKeyName, effectiveRangeKeyName);
         }
-        else if (root.TryGetProperty("KeyConditions", out var keyConditions))
+        else if (request.KeyConditions is JsonElement keyConditions)
         {
             (pkValue, skCondition) = PreExpressionRequestParser.ParseKeyConditions(keyConditions, effectiveHashKeyName, effectiveRangeKeyName);
         }
@@ -54,10 +47,10 @@ public sealed class QueryScanOperations(ITableStore tableStore, IItemStore itemS
 
         // Get items by partition key
         List<Dictionary<string, AttributeValue>> items;
-        if (indexName != null)
-            items = itemStore.QueryByPartitionKeyOnIndex(tableName, indexName, table.HashKeyName, pkValue);
+        if (request.IndexName != null)
+            items = itemStore.QueryByPartitionKeyOnIndex(request.TableName, request.IndexName, table.HashKeyName, pkValue);
         else
-            items = itemStore.QueryByPartitionKey(tableName, table.HashKeyName, pkValue);
+            items = itemStore.QueryByPartitionKey(request.TableName, table.HashKeyName, pkValue);
 
         // Apply sort key condition
         if (skCondition != null && effectiveRangeKeyName != null)
@@ -70,17 +63,14 @@ public sealed class QueryScanOperations(ITableStore tableStore, IItemStore itemS
         }
 
         // ScanIndexForward
-        bool scanForward = true;
-        if (root.TryGetProperty("ScanIndexForward", out var sif))
-            scanForward = sif.GetBoolean();
+        bool scanForward = request.ScanIndexForward ?? true;
         if (!scanForward)
             items.Reverse();
 
         // Pagination: ExclusiveStartKey
-        if (root.TryGetProperty("ExclusiveStartKey", out var esk))
+        if (request.ExclusiveStartKey != null)
         {
-            var startKey = ItemOperations.DeserializeItem(esk);
-            var startIndex = FindExclusiveStartIndex(items, startKey, table);
+            var startIndex = FindExclusiveStartIndex(items, request.ExclusiveStartKey, table);
             if (startIndex >= 0)
                 items = items.Skip(startIndex + 1).ToList();
             else
@@ -88,69 +78,83 @@ public sealed class QueryScanOperations(ITableStore tableStore, IItemStore itemS
         }
 
         // Limit (applied before filter)
-        int? limit = null;
-        if (root.TryGetProperty("Limit", out var lim))
-            limit = lim.GetInt32();
-
         int scannedCount;
         bool hasMore = false;
 
-        if (limit.HasValue && items.Count > limit.Value)
+        if (request.Limit.HasValue && items.Count > request.Limit.Value)
         {
-            items = items.Take(limit.Value).ToList();
+            items = items.Take(request.Limit.Value).ToList();
             hasMore = true;
         }
         scannedCount = items.Count;
 
         // FilterExpression (expression format) or QueryFilter (pre-expression format)
-        if (root.TryGetProperty("FilterExpression", out var fe))
+        if (request.FilterExpression != null)
         {
-            var ast = DynamoDbExpressionParser.ParseCondition(fe.GetString()!, expressionAttributeNames);
-            var evaluator = new ConditionEvaluator(expressionAttributeValues);
+            var ast = DynamoDbExpressionParser.ParseCondition(request.FilterExpression, request.ExpressionAttributeNames);
+            var evaluator = new ConditionEvaluator(request.ExpressionAttributeValues);
             items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
         }
-        else if (root.TryGetProperty("QueryFilter", out var qf))
+        else if (request.QueryFilter is JsonElement qf)
         {
-            bool useOr = root.TryGetProperty("ConditionalOperator", out var co) && co.GetString() == "OR";
+            bool useOr = request.ConditionalOperator == "OR";
             var predicate = PreExpressionRequestParser.ParseFilterConditions(qf, useOr);
             items = items.Where(predicate).ToList();
         }
 
-        // Select = COUNT
-        string? select = null;
-        if (root.TryGetProperty("Select", out var sel))
-            select = sel.GetString();
-
         // ProjectionExpression
-        string? projectionExpression = null;
-        if (root.TryGetProperty("ProjectionExpression", out var pe))
-            projectionExpression = pe.GetString();
+        if (request.ProjectionExpression != null)
+            items = items.Select(item => ItemOperations.ApplyProjection(item, request.ProjectionExpression, request.ExpressionAttributeNames)).ToList();
 
-        if (projectionExpression != null)
-            items = items.Select(item => ItemOperations.ApplyProjection(item, projectionExpression, expressionAttributeNames)).ToList();
+        // Build LastEvaluatedKey
+        Dictionary<string, AttributeValue>? lastEvaluatedKey = null;
+        if (hasMore && items.Count > 0)
+        {
+            var lastItem = items[^1];
+            lastEvaluatedKey = ItemOperations.ExtractKey(lastItem, table);
+            if (lsiDef != null && lastItem.TryGetValue(lsiDef.RangeKeyName, out var lsiSkVal))
+                lastEvaluatedKey[lsiDef.RangeKeyName] = lsiSkVal;
+            if (gsiDef != null)
+            {
+                if (lastItem.TryGetValue(gsiDef.HashKeyName, out var gsiHkVal))
+                    lastEvaluatedKey[gsiDef.HashKeyName] = gsiHkVal;
+                if (gsiDef.RangeKeyName != null && lastItem.TryGetValue(gsiDef.RangeKeyName, out var gsiSkVal))
+                    lastEvaluatedKey[gsiDef.RangeKeyName] = gsiSkVal;
+            }
+        }
 
-        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select, lsiDef, gsiDef,
-            tableName, root.TryGetProperty("ReturnConsumedCapacity", out var rcc) ? rcc.GetString() : null);
+        // ConsumedCapacity
+        ConsumedCapacityDto? consumedCapacity = null;
+        if (request.ReturnConsumedCapacity is "TOTAL" or "INDEXES")
+        {
+            consumedCapacity = new ConsumedCapacityDto
+            {
+                TableName = request.TableName,
+                CapacityUnits = 1.0
+            };
+        }
+
+        return new QueryResponse
+        {
+            Items = request.Select != "COUNT" ? items : null,
+            Count = items.Count,
+            ScannedCount = scannedCount,
+            LastEvaluatedKey = lastEvaluatedKey,
+            ConsumedCapacity = consumedCapacity
+        };
     }
 
-    public JsonDocument Scan(JsonDocument request)
+    public ScanResponse Scan(ScanRequest request)
     {
-        var root = request.RootElement;
-        var tableName = root.GetProperty("TableName").GetString()!;
-        var table = tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(request.TableName);
 
-        var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
-            ? ItemOperations.DeserializeStringMap(ean) : null;
-        var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
-            ? ItemOperations.DeserializeItem(eav) : null;
-
-        var items = itemStore.GetAllItems(tableName);
+        var items = itemStore.GetAllItems(request.TableName);
 
         // Parallel scan: Segment / TotalSegments
-        if (root.TryGetProperty("TotalSegments", out var ts))
+        if (request.TotalSegments.HasValue)
         {
-            var totalSegments = ts.GetInt32();
-            var segment = root.GetProperty("Segment").GetInt32();
+            var totalSegments = request.TotalSegments.Value;
+            var segment = request.Segment!.Value;
             items = items.Where(item =>
             {
                 var pkValue = item[table.HashKeyName];
@@ -160,10 +164,9 @@ public sealed class QueryScanOperations(ITableStore tableStore, IItemStore itemS
         }
 
         // ExclusiveStartKey
-        if (root.TryGetProperty("ExclusiveStartKey", out var esk))
+        if (request.ExclusiveStartKey != null)
         {
-            var startKey = ItemOperations.DeserializeItem(esk);
-            var startIndex = FindExclusiveStartIndex(items, startKey, table);
+            var startIndex = FindExclusiveStartIndex(items, request.ExclusiveStartKey, table);
             if (startIndex >= 0)
                 items = items.Skip(startIndex + 1).ToList();
             else
@@ -171,46 +174,47 @@ public sealed class QueryScanOperations(ITableStore tableStore, IItemStore itemS
         }
 
         // Limit
-        int? limit = null;
-        if (root.TryGetProperty("Limit", out var lim))
-            limit = lim.GetInt32();
-
         bool hasMore = false;
-        if (limit.HasValue && items.Count > limit.Value)
+        if (request.Limit.HasValue && items.Count > request.Limit.Value)
         {
-            items = items.Take(limit.Value).ToList();
+            items = items.Take(request.Limit.Value).ToList();
             hasMore = true;
         }
         int scannedCount = items.Count;
 
         // FilterExpression (expression format) or ScanFilter (pre-expression format)
-        if (root.TryGetProperty("FilterExpression", out var fe))
+        if (request.FilterExpression != null)
         {
-            var ast = DynamoDbExpressionParser.ParseCondition(fe.GetString()!, expressionAttributeNames);
-            var evaluator = new ConditionEvaluator(expressionAttributeValues);
+            var ast = DynamoDbExpressionParser.ParseCondition(request.FilterExpression, request.ExpressionAttributeNames);
+            var evaluator = new ConditionEvaluator(request.ExpressionAttributeValues);
             items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
         }
-        else if (root.TryGetProperty("ScanFilter", out var sf))
+        else if (request.ScanFilter is JsonElement sf)
         {
-            bool useOr = root.TryGetProperty("ConditionalOperator", out var co) && co.GetString() == "OR";
+            bool useOr = request.ConditionalOperator == "OR";
             var predicate = PreExpressionRequestParser.ParseFilterConditions(sf, useOr);
             items = items.Where(predicate).ToList();
         }
 
-        // Select
-        string? select = null;
-        if (root.TryGetProperty("Select", out var sel))
-            select = sel.GetString();
-
         // ProjectionExpression
-        string? projectionExpression = null;
-        if (root.TryGetProperty("ProjectionExpression", out var pe))
-            projectionExpression = pe.GetString();
+        if (request.ProjectionExpression != null)
+            items = items.Select(item => ItemOperations.ApplyProjection(item, request.ProjectionExpression, request.ExpressionAttributeNames)).ToList();
 
-        if (projectionExpression != null)
-            items = items.Select(item => ItemOperations.ApplyProjection(item, projectionExpression, expressionAttributeNames)).ToList();
+        // Build LastEvaluatedKey
+        Dictionary<string, AttributeValue>? lastEvaluatedKey = null;
+        if (hasMore && items.Count > 0)
+        {
+            var lastItem = items[^1];
+            lastEvaluatedKey = ItemOperations.ExtractKey(lastItem, table);
+        }
 
-        return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select);
+        return new ScanResponse
+        {
+            Items = request.Select != "COUNT" ? items : null,
+            Count = items.Count,
+            ScannedCount = scannedCount,
+            LastEvaluatedKey = lastEvaluatedKey
+        };
     }
 
     private (AttributeValue pkValue, SortKeyCondition? skCondition) ParseKeyCondition(
@@ -347,63 +351,6 @@ public sealed class QueryScanOperations(ITableStore tableStore, IItemStore itemS
             if (match) return i;
         }
         return -1;
-    }
-
-    private JsonDocument BuildQueryScanResponse(
-        List<Dictionary<string, AttributeValue>> items,
-        int scannedCount,
-        List<Dictionary<string, AttributeValue>>? lastPageItems,
-        TableDefinition table,
-        string? select,
-        LocalSecondaryIndexDefinition? lsiDef = null,
-        GlobalSecondaryIndexDefinition? gsiDef = null,
-        string? tableName = null,
-        string? returnConsumedCapacity = null)
-    {
-        using var stream = new MemoryStream();
-        using var writer = new Utf8JsonWriter(stream);
-        writer.WriteStartObject();
-
-        if (select != "COUNT")
-        {
-            writer.WritePropertyName("Items");
-            ItemOperations.WriteItemsList(writer, items);
-        }
-
-        writer.WriteNumber("Count", items.Count);
-        writer.WriteNumber("ScannedCount", scannedCount);
-
-        // LastEvaluatedKey
-        if (lastPageItems != null && lastPageItems.Count > 0)
-        {
-            var lastItem = lastPageItems[^1];
-            writer.WritePropertyName("LastEvaluatedKey");
-            var lastKey = ItemOperations.ExtractKey(lastItem, table);
-            if (lsiDef != null && lastItem.TryGetValue(lsiDef.RangeKeyName, out var lsiSkVal))
-                lastKey[lsiDef.RangeKeyName] = lsiSkVal;
-            if (gsiDef != null)
-            {
-                if (lastItem.TryGetValue(gsiDef.HashKeyName, out var gsiHkVal))
-                    lastKey[gsiDef.HashKeyName] = gsiHkVal;
-                if (gsiDef.RangeKeyName != null && lastItem.TryGetValue(gsiDef.RangeKeyName, out var gsiSkVal))
-                    lastKey[gsiDef.RangeKeyName] = gsiSkVal;
-            }
-            ItemOperations.WriteItem(writer, lastKey);
-        }
-
-        // ConsumedCapacity (returned when explicitly requested)
-        if (tableName != null && returnConsumedCapacity is "TOTAL" or "INDEXES")
-        {
-            writer.WritePropertyName("ConsumedCapacity");
-            writer.WriteStartObject();
-            writer.WriteString("TableName", tableName);
-            writer.WriteNumber("CapacityUnits", 1.0);
-            writer.WriteEndObject();
-        }
-
-        writer.WriteEndObject();
-        writer.Flush();
-        return JsonDocument.Parse(stream.ToArray());
     }
 
     internal static uint Fnv1aHash(string data)

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using MockDynamoDB.Core.Models;
 using MockDynamoDB.Core.Storage;
 
@@ -6,177 +5,216 @@ namespace MockDynamoDB.Core.Operations;
 
 public sealed class TableOperations(ITableStore tableStore, IItemStore itemStore)
 {
-    public JsonDocument CreateTable(JsonDocument request)
+    public CreateTableResponse CreateTable(CreateTableRequest request)
     {
-        var root = request.RootElement;
-        var tableName = root.GetProperty("TableName").GetString()!;
-        var keySchema = ParseKeySchema(root.GetProperty("KeySchema"));
-        var attrDefs = ParseAttributeDefinitions(root.GetProperty("AttributeDefinitions"));
+        var keySchema = request.KeySchema.Select(k => new KeySchemaElement
+        {
+            AttributeName = k.AttributeName,
+            KeyType = k.KeyType
+        }).ToList();
+
+        var attrDefs = request.AttributeDefinitions.Select(a => new AttributeDefinition
+        {
+            AttributeName = a.AttributeName,
+            AttributeType = a.AttributeType
+        }).ToList();
 
         ValidateKeySchemaAttributes(keySchema, attrDefs);
 
         var table = new TableDefinition
         {
-            TableName = tableName,
+            TableName = request.TableName,
             KeySchema = keySchema,
             AttributeDefinitions = attrDefs,
-            BillingMode = root.TryGetProperty("BillingMode", out var bm) ? bm.GetString() : "PAY_PER_REQUEST"
+            BillingMode = request.BillingMode ?? "PAY_PER_REQUEST"
         };
 
-        if (root.TryGetProperty("LocalSecondaryIndexes", out var lsiProp))
+        if (request.LocalSecondaryIndexes != null)
         {
-            table.LocalSecondaryIndexes = ParseLocalSecondaryIndexes(lsiProp, table.HashKeyName, attrDefs);
+            table.LocalSecondaryIndexes = ParseLocalSecondaryIndexes(request.LocalSecondaryIndexes, table.HashKeyName, attrDefs);
         }
 
-        if (root.TryGetProperty("GlobalSecondaryIndexes", out var gsiProp))
+        if (request.GlobalSecondaryIndexes != null)
         {
-            table.GlobalSecondaryIndexes = ParseGlobalSecondaryIndexes(gsiProp, attrDefs);
+            table.GlobalSecondaryIndexes = ParseGlobalSecondaryIndexes(request.GlobalSecondaryIndexes, attrDefs);
         }
 
         tableStore.CreateTable(table);
-        itemStore.EnsureTable(tableName);
+        itemStore.EnsureTable(request.TableName);
 
-        return BuildTableDescriptionResponse("TableDescription", table);
+        return new CreateTableResponse { TableDescription = MapTableDescription(table) };
     }
 
-    public JsonDocument DeleteTable(JsonDocument request)
+    public DeleteTableResponse DeleteTable(DeleteTableRequest request)
     {
-        var tableName = request.RootElement.GetProperty("TableName").GetString()!;
-        var table = tableStore.DeleteTable(tableName);
-        itemStore.RemoveTable(tableName);
+        var table = tableStore.DeleteTable(request.TableName);
+        itemStore.RemoveTable(request.TableName);
         table.TableStatus = "DELETING";
-        return BuildTableDescriptionResponse("TableDescription", table);
+        return new DeleteTableResponse { TableDescription = MapTableDescription(table) };
     }
 
-    public JsonDocument DescribeTable(JsonDocument request)
+    public DescribeTableResponse DescribeTable(DescribeTableRequest request)
     {
-        var tableName = request.RootElement.GetProperty("TableName").GetString()!;
-        var table = tableStore.GetTable(tableName);
-        return BuildTableDescriptionResponse("Table", table);
+        var table = tableStore.GetTable(request.TableName);
+        return new DescribeTableResponse { Table = MapTableDescription(table) };
     }
 
-    public JsonDocument ListTables(JsonDocument request)
+    public ListTablesResponse ListTables(ListTablesRequest request)
     {
-        var root = request.RootElement;
         var allNames = tableStore.ListTableNames();
 
-        string? startTableName = null;
-        int? limit = null;
-
-        if (root.TryGetProperty("ExclusiveStartTableName", out var start))
-            startTableName = start.GetString();
-        if (root.TryGetProperty("Limit", out var lim))
-            limit = lim.GetInt32();
-
         var filtered = allNames.AsEnumerable();
-        if (startTableName != null)
-            filtered = filtered.Where(n => string.Compare(n, startTableName, StringComparison.Ordinal) > 0);
+        if (request.ExclusiveStartTableName != null)
+            filtered = filtered.Where(n => string.Compare(n, request.ExclusiveStartTableName, StringComparison.Ordinal) > 0);
 
         var names = filtered.ToList();
         string? lastEvaluated = null;
 
-        if (limit.HasValue && names.Count > limit.Value)
+        if (request.Limit.HasValue && names.Count > request.Limit.Value)
         {
-            names = names.Take(limit.Value).ToList();
+            names = names.Take(request.Limit.Value).ToList();
             lastEvaluated = names.Last();
         }
 
-        using var stream = new MemoryStream();
-        using var writer = new Utf8JsonWriter(stream);
-        writer.WriteStartObject();
-        writer.WritePropertyName("TableNames");
-        writer.WriteStartArray();
-        foreach (var name in names)
-            writer.WriteStringValue(name);
-        writer.WriteEndArray();
-        if (lastEvaluated != null)
-            writer.WriteString("LastEvaluatedTableName", lastEvaluated);
-        writer.WriteEndObject();
-        writer.Flush();
-
-        return JsonDocument.Parse(stream.ToArray());
+        return new ListTablesResponse
+        {
+            TableNames = names,
+            LastEvaluatedTableName = lastEvaluated
+        };
     }
 
-    private static List<KeySchemaElement> ParseKeySchema(JsonElement element)
+    internal static TableDescriptionDto MapTableDescription(TableDefinition table)
     {
-        var result = new List<KeySchemaElement>();
-        foreach (var item in element.EnumerateArray())
+        return new TableDescriptionDto
         {
-            result.Add(new KeySchemaElement
+            TableName = table.TableName,
+            TableStatus = table.TableStatus,
+            TableArn = table.TableArn,
+            TableId = table.TableId,
+            CreationDateTime = new DateTimeOffset(table.CreationDateTime).ToUnixTimeSeconds(),
+            ItemCount = table.ItemCount,
+            TableSizeBytes = table.TableSizeBytes,
+            KeySchema = table.KeySchema.Select(k => new KeySchemaElementDto
             {
-                AttributeName = item.GetProperty("AttributeName").GetString()!,
-                KeyType = item.GetProperty("KeyType").GetString()!
-            });
-        }
-        return result;
-    }
-
-    private static List<AttributeDefinition> ParseAttributeDefinitions(JsonElement element)
-    {
-        var result = new List<AttributeDefinition>();
-        foreach (var item in element.EnumerateArray())
-        {
-            result.Add(new AttributeDefinition
+                AttributeName = k.AttributeName,
+                KeyType = k.KeyType
+            }).ToList(),
+            AttributeDefinitions = table.AttributeDefinitions.Select(a => new AttributeDefinitionDto
             {
-                AttributeName = item.GetProperty("AttributeName").GetString()!,
-                AttributeType = item.GetProperty("AttributeType").GetString()!
-            });
-        }
-        return result;
+                AttributeName = a.AttributeName,
+                AttributeType = a.AttributeType
+            }).ToList(),
+            ProvisionedThroughput = new ProvisionedThroughputDto
+            {
+                ReadCapacityUnits = 0,
+                WriteCapacityUnits = 0,
+                NumberOfDecreasesToday = 0
+            },
+            BillingModeSummary = table.BillingMode != null
+                ? new BillingModeSummaryDto { BillingMode = table.BillingMode }
+                : null,
+            LocalSecondaryIndexes = table.LocalSecondaryIndexes is { Count: > 0 }
+                ? table.LocalSecondaryIndexes.Select(lsi => new LocalSecondaryIndexDto
+                {
+                    IndexName = lsi.IndexName,
+                    IndexArn = $"{table.TableArn}/index/{lsi.IndexName}",
+                    IndexSizeBytes = 0,
+                    ItemCount = 0,
+                    KeySchema = lsi.KeySchema.Select(k => new KeySchemaElementDto
+                    {
+                        AttributeName = k.AttributeName,
+                        KeyType = k.KeyType
+                    }).ToList(),
+                    Projection = new ProjectionDto
+                    {
+                        ProjectionType = lsi.Projection.ProjectionType,
+                        NonKeyAttributes = lsi.Projection.NonKeyAttributes
+                    }
+                }).ToList()
+                : null,
+            GlobalSecondaryIndexes = table.GlobalSecondaryIndexes is { Count: > 0 }
+                ? table.GlobalSecondaryIndexes.Select(gsi => new GlobalSecondaryIndexDto
+                {
+                    IndexName = gsi.IndexName,
+                    IndexArn = $"{table.TableArn}/index/{gsi.IndexName}",
+                    IndexStatus = "ACTIVE",
+                    IndexSizeBytes = 0,
+                    ItemCount = 0,
+                    KeySchema = gsi.KeySchema.Select(k => new KeySchemaElementDto
+                    {
+                        AttributeName = k.AttributeName,
+                        KeyType = k.KeyType
+                    }).ToList(),
+                    Projection = new ProjectionDto
+                    {
+                        ProjectionType = gsi.Projection.ProjectionType,
+                        NonKeyAttributes = gsi.Projection.NonKeyAttributes
+                    }
+                }).ToList()
+                : null
+        };
     }
 
     private static List<LocalSecondaryIndexDefinition> ParseLocalSecondaryIndexes(
-        JsonElement element, string tableHashKey, List<AttributeDefinition> attrDefs)
+        List<LocalSecondaryIndexDto> indexes, string tableHashKey, List<AttributeDefinition> attrDefs)
     {
-        var indexes = new List<LocalSecondaryIndexDefinition>();
+        var result = new List<LocalSecondaryIndexDefinition>();
 
-        foreach (var item in element.EnumerateArray())
+        foreach (var idx in indexes)
         {
-            var indexName = item.GetProperty("IndexName").GetString()!;
-            var keySchema = ParseKeySchema(item.GetProperty("KeySchema"));
-            var projection = ParseProjection(item.GetProperty("Projection"));
+            var keySchema = idx.KeySchema.Select(k => new KeySchemaElement
+            {
+                AttributeName = k.AttributeName,
+                KeyType = k.KeyType
+            }).ToList();
 
             var hashKey = keySchema.FirstOrDefault(k => k.KeyType == "HASH");
             if (hashKey == null || hashKey.AttributeName != tableHashKey)
                 throw new ValidationException(
-                    $"Table KeySchema: The AttributeValue for a key attribute cannot contain an empty string value. Index: {indexName}");
+                    $"Table KeySchema: The AttributeValue for a key attribute cannot contain an empty string value. Index: {idx.IndexName}");
 
             var rangeKey = keySchema.FirstOrDefault(k => k.KeyType == "RANGE");
             if (rangeKey == null)
-                throw new ValidationException($"Local Secondary Index {indexName} must have a RANGE key");
+                throw new ValidationException($"Local Secondary Index {idx.IndexName} must have a RANGE key");
 
             if (!attrDefs.Any(a => a.AttributeName == rangeKey.AttributeName))
                 throw new ValidationException(
                     $"One or more parameter values were invalid: Some index key attributes are not defined in AttributeDefinitions.");
 
-            indexes.Add(new LocalSecondaryIndexDefinition
+            result.Add(new LocalSecondaryIndexDefinition
             {
-                IndexName = indexName,
+                IndexName = idx.IndexName,
                 KeySchema = keySchema,
-                Projection = projection
+                Projection = new ProjectionDefinition
+                {
+                    ProjectionType = idx.Projection.ProjectionType,
+                    NonKeyAttributes = idx.Projection.NonKeyAttributes
+                }
             });
         }
 
-        if (indexes.Count > 5)
+        if (result.Count > 5)
             throw new ValidationException("One or more parameter values were invalid: Number of local secondary indexes exceeds limit of 5");
 
-        return indexes;
+        return result;
     }
 
     private static List<GlobalSecondaryIndexDefinition> ParseGlobalSecondaryIndexes(
-        JsonElement element, List<AttributeDefinition> attrDefs)
+        List<GlobalSecondaryIndexDto> indexes, List<AttributeDefinition> attrDefs)
     {
-        var indexes = new List<GlobalSecondaryIndexDefinition>();
+        var result = new List<GlobalSecondaryIndexDefinition>();
 
-        foreach (var item in element.EnumerateArray())
+        foreach (var idx in indexes)
         {
-            var indexName = item.GetProperty("IndexName").GetString()!;
-            var keySchema = ParseKeySchema(item.GetProperty("KeySchema"));
-            var projection = ParseProjection(item.GetProperty("Projection"));
+            var keySchema = idx.KeySchema.Select(k => new KeySchemaElement
+            {
+                AttributeName = k.AttributeName,
+                KeyType = k.KeyType
+            }).ToList();
 
             var hashKey = keySchema.FirstOrDefault(k => k.KeyType == "HASH");
             if (hashKey == null)
-                throw new ValidationException($"Global Secondary Index {indexName} must have a HASH key");
+                throw new ValidationException($"Global Secondary Index {idx.IndexName} must have a HASH key");
 
             if (!attrDefs.Any(a => a.AttributeName == hashKey.AttributeName))
                 throw new ValidationException(
@@ -187,29 +225,22 @@ public sealed class TableOperations(ITableStore tableStore, IItemStore itemStore
                 throw new ValidationException(
                     "One or more parameter values were invalid: Some index key attributes are not defined in AttributeDefinitions.");
 
-            indexes.Add(new GlobalSecondaryIndexDefinition
+            result.Add(new GlobalSecondaryIndexDefinition
             {
-                IndexName = indexName,
+                IndexName = idx.IndexName,
                 KeySchema = keySchema,
-                Projection = projection
+                Projection = new ProjectionDefinition
+                {
+                    ProjectionType = idx.Projection.ProjectionType,
+                    NonKeyAttributes = idx.Projection.NonKeyAttributes
+                }
             });
         }
 
-        if (indexes.Count > 20)
+        if (result.Count > 20)
             throw new ValidationException("One or more parameter values were invalid: Number of global secondary indexes exceeds limit of 20");
 
-        return indexes;
-    }
-
-    private static ProjectionDefinition ParseProjection(JsonElement element)
-    {
-        return new ProjectionDefinition
-        {
-            ProjectionType = element.TryGetProperty("ProjectionType", out var pt) ? pt.GetString()! : "ALL",
-            NonKeyAttributes = element.TryGetProperty("NonKeyAttributes", out var nka)
-                ? nka.EnumerateArray().Select(e => e.GetString()!).ToList()
-                : null
-        };
+        return result;
     }
 
     private static void ValidateKeySchemaAttributes(List<KeySchemaElement> keySchema, List<AttributeDefinition> attrDefs)
@@ -220,151 +251,5 @@ public sealed class TableOperations(ITableStore tableStore, IItemStore itemStore
                 throw new ValidationException(
                     $"One or more parameter values were invalid: Some index key attributes are not defined in AttributeDefinitions. Keys: [{key.AttributeName}], AttributeDefinitions: [{string.Join(", ", attrDefs.Select(a => a.AttributeName))}]");
         }
-    }
-
-    private static JsonDocument BuildTableDescriptionResponse(string wrapperName, TableDefinition table)
-    {
-        using var stream = new MemoryStream();
-        using var writer = new Utf8JsonWriter(stream);
-        writer.WriteStartObject();
-        writer.WritePropertyName(wrapperName);
-        WriteTableDescription(writer, table);
-        writer.WriteEndObject();
-        writer.Flush();
-        return JsonDocument.Parse(stream.ToArray());
-    }
-
-    private static void WriteTableDescription(Utf8JsonWriter writer, TableDefinition table)
-    {
-        writer.WriteStartObject();
-        writer.WriteString("TableName", table.TableName);
-        writer.WriteString("TableStatus", table.TableStatus);
-        writer.WriteString("TableArn", table.TableArn);
-        writer.WriteString("TableId", table.TableId);
-        writer.WriteNumber("CreationDateTime", new DateTimeOffset(table.CreationDateTime).ToUnixTimeSeconds());
-        writer.WriteNumber("ItemCount", table.ItemCount);
-        writer.WriteNumber("TableSizeBytes", table.TableSizeBytes);
-
-        writer.WritePropertyName("KeySchema");
-        writer.WriteStartArray();
-        foreach (var key in table.KeySchema)
-        {
-            writer.WriteStartObject();
-            writer.WriteString("AttributeName", key.AttributeName);
-            writer.WriteString("KeyType", key.KeyType);
-            writer.WriteEndObject();
-        }
-        writer.WriteEndArray();
-
-        writer.WritePropertyName("AttributeDefinitions");
-        writer.WriteStartArray();
-        foreach (var attr in table.AttributeDefinitions)
-        {
-            writer.WriteStartObject();
-            writer.WriteString("AttributeName", attr.AttributeName);
-            writer.WriteString("AttributeType", attr.AttributeType);
-            writer.WriteEndObject();
-        }
-        writer.WriteEndArray();
-
-        writer.WritePropertyName("ProvisionedThroughput");
-        writer.WriteStartObject();
-        writer.WriteNumber("ReadCapacityUnits", 0);
-        writer.WriteNumber("WriteCapacityUnits", 0);
-        writer.WriteNumber("NumberOfDecreasesToday", 0);
-        writer.WriteEndObject();
-
-        if (table.BillingMode != null)
-        {
-            writer.WritePropertyName("BillingModeSummary");
-            writer.WriteStartObject();
-            writer.WriteString("BillingMode", table.BillingMode);
-            writer.WriteEndObject();
-        }
-
-        if (table.LocalSecondaryIndexes != null && table.LocalSecondaryIndexes.Count > 0)
-        {
-            writer.WritePropertyName("LocalSecondaryIndexes");
-            writer.WriteStartArray();
-            foreach (var lsi in table.LocalSecondaryIndexes)
-            {
-                writer.WriteStartObject();
-                writer.WriteString("IndexName", lsi.IndexName);
-                writer.WriteString("IndexArn", $"{table.TableArn}/index/{lsi.IndexName}");
-                writer.WriteNumber("IndexSizeBytes", 0);
-                writer.WriteNumber("ItemCount", 0);
-
-                writer.WritePropertyName("KeySchema");
-                writer.WriteStartArray();
-                foreach (var key in lsi.KeySchema)
-                {
-                    writer.WriteStartObject();
-                    writer.WriteString("AttributeName", key.AttributeName);
-                    writer.WriteString("KeyType", key.KeyType);
-                    writer.WriteEndObject();
-                }
-                writer.WriteEndArray();
-
-                writer.WritePropertyName("Projection");
-                writer.WriteStartObject();
-                writer.WriteString("ProjectionType", lsi.Projection.ProjectionType);
-                if (lsi.Projection.NonKeyAttributes != null)
-                {
-                    writer.WritePropertyName("NonKeyAttributes");
-                    writer.WriteStartArray();
-                    foreach (var attr in lsi.Projection.NonKeyAttributes)
-                        writer.WriteStringValue(attr);
-                    writer.WriteEndArray();
-                }
-                writer.WriteEndObject();
-
-                writer.WriteEndObject();
-            }
-            writer.WriteEndArray();
-        }
-
-        if (table.GlobalSecondaryIndexes != null && table.GlobalSecondaryIndexes.Count > 0)
-        {
-            writer.WritePropertyName("GlobalSecondaryIndexes");
-            writer.WriteStartArray();
-            foreach (var gsi in table.GlobalSecondaryIndexes)
-            {
-                writer.WriteStartObject();
-                writer.WriteString("IndexName", gsi.IndexName);
-                writer.WriteString("IndexArn", $"{table.TableArn}/index/{gsi.IndexName}");
-                writer.WriteString("IndexStatus", "ACTIVE");
-                writer.WriteNumber("IndexSizeBytes", 0);
-                writer.WriteNumber("ItemCount", 0);
-
-                writer.WritePropertyName("KeySchema");
-                writer.WriteStartArray();
-                foreach (var key in gsi.KeySchema)
-                {
-                    writer.WriteStartObject();
-                    writer.WriteString("AttributeName", key.AttributeName);
-                    writer.WriteString("KeyType", key.KeyType);
-                    writer.WriteEndObject();
-                }
-                writer.WriteEndArray();
-
-                writer.WritePropertyName("Projection");
-                writer.WriteStartObject();
-                writer.WriteString("ProjectionType", gsi.Projection.ProjectionType);
-                if (gsi.Projection.NonKeyAttributes != null)
-                {
-                    writer.WritePropertyName("NonKeyAttributes");
-                    writer.WriteStartArray();
-                    foreach (var attr in gsi.Projection.NonKeyAttributes)
-                        writer.WriteStringValue(attr);
-                    writer.WriteEndArray();
-                }
-                writer.WriteEndObject();
-
-                writer.WriteEndObject();
-            }
-            writer.WriteEndArray();
-        }
-
-        writer.WriteEndObject();
     }
 }

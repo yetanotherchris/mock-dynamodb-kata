@@ -222,10 +222,10 @@ internal static class PreExpressionRequestParser
     // -------------------------------------------------------------------------
     internal static void EvaluateExpected(
         JsonElement expected,
-        JsonElement root,
+        string? conditionalOperator,
         Dictionary<string, AttributeValue>? existingItem)
     {
-        bool useOrOperator = root.TryGetProperty("ConditionalOperator", out var co) && co.GetString() == "OR";
+        bool useOrOperator = conditionalOperator == "OR";
 
         var results = new List<bool>();
 

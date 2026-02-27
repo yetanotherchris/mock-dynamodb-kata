@@ -7,132 +7,100 @@ namespace MockDynamoDB.Core.Operations;
 
 public sealed class ItemOperations(ITableStore tableStore, IItemStore itemStore)
 {
-    internal static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = null
-    };
+    internal static readonly JsonSerializerOptions JsonOptions = DynamoDbJsonOptions.Options;
 
-    public JsonDocument PutItem(JsonDocument request)
+    public PutItemResponse PutItem(PutItemRequest request)
     {
-        var root = request.RootElement;
-        var tableName = root.GetProperty("TableName").GetString()!;
-        var table = tableStore.GetTable(tableName);
-        var item = DeserializeItem(root.GetProperty("Item"));
+        var table = tableStore.GetTable(request.TableName);
+        var item = request.Item;
 
         ValidateKeyAttributes(item, table);
 
-        string? returnValues = null;
-        if (root.TryGetProperty("ReturnValues", out var rv))
-            returnValues = rv.GetString();
-
         var key = ExtractKey(item, table);
-        var oldItem = itemStore.GetItem(tableName, key);
+        var oldItem = itemStore.GetItem(request.TableName, key);
 
-        EvaluateConditionExpression(root, oldItem);
-        if (root.TryGetProperty("Expected", out var exp))
-            PreExpressionRequestParser.EvaluateExpected(exp, root, oldItem);
+        EvaluateConditionExpression(request.ConditionExpression, request.ExpressionAttributeNames,
+            request.ExpressionAttributeValues, oldItem);
+        if (request.Expected is JsonElement exp)
+            PreExpressionRequestParser.EvaluateExpected(exp, request.ConditionalOperator, oldItem);
 
-        itemStore.PutItem(tableName, item);
+        itemStore.PutItem(request.TableName, item);
 
-        return BuildItemResponse(returnValues == "ALL_OLD" ? oldItem : null);
+        return new PutItemResponse
+        {
+            Attributes = request.ReturnValues == "ALL_OLD" ? oldItem : null
+        };
     }
 
-    public JsonDocument GetItem(JsonDocument request)
+    public GetItemResponse GetItem(GetItemRequest request)
     {
-        var root = request.RootElement;
-        var tableName = root.GetProperty("TableName").GetString()!;
-        tableStore.GetTable(tableName);
-        var key = DeserializeItem(root.GetProperty("Key"));
-
-        var item = itemStore.GetItem(tableName, key);
+        tableStore.GetTable(request.TableName);
+        var item = itemStore.GetItem(request.TableName, request.Key);
 
         if (item == null)
-            return BuildEmptyResponse();
+            return new GetItemResponse();
 
-        string? projectionExpression = null;
-        Dictionary<string, string>? expressionAttributeNames = null;
+        if (request.ProjectionExpression != null)
+            item = ApplyProjection(item, request.ProjectionExpression, request.ExpressionAttributeNames);
 
-        if (root.TryGetProperty("ProjectionExpression", out var pe))
-            projectionExpression = pe.GetString();
-        if (root.TryGetProperty("ExpressionAttributeNames", out var ean))
-            expressionAttributeNames = DeserializeStringMap(ean);
-
-        if (projectionExpression != null)
-            item = ApplyProjection(item, projectionExpression, expressionAttributeNames);
-
-        return BuildGetItemResponse(item);
+        return new GetItemResponse { Item = item };
     }
 
-    public JsonDocument DeleteItem(JsonDocument request)
+    public DeleteItemResponse DeleteItem(DeleteItemRequest request)
     {
-        var root = request.RootElement;
-        var tableName = root.GetProperty("TableName").GetString()!;
-        tableStore.GetTable(tableName);
-        var key = DeserializeItem(root.GetProperty("Key"));
+        tableStore.GetTable(request.TableName);
 
-        string? returnValues = null;
-        if (root.TryGetProperty("ReturnValues", out var rv))
-            returnValues = rv.GetString();
+        var oldItem = itemStore.GetItem(request.TableName, request.Key);
+        EvaluateConditionExpression(request.ConditionExpression, request.ExpressionAttributeNames,
+            request.ExpressionAttributeValues, oldItem);
+        if (request.Expected is JsonElement exp)
+            PreExpressionRequestParser.EvaluateExpected(exp, request.ConditionalOperator, oldItem);
 
-        var oldItem = itemStore.GetItem(tableName, key);
-        EvaluateConditionExpression(root, oldItem);
-        if (root.TryGetProperty("Expected", out var exp))
-            PreExpressionRequestParser.EvaluateExpected(exp, root, oldItem);
+        var deleted = itemStore.DeleteItem(request.TableName, request.Key);
 
-        var deleted = itemStore.DeleteItem(tableName, key);
-
-        return BuildItemResponse(returnValues == "ALL_OLD" ? deleted : null);
+        return new DeleteItemResponse
+        {
+            Attributes = request.ReturnValues == "ALL_OLD" ? deleted : null
+        };
     }
 
-    public JsonDocument UpdateItem(JsonDocument request)
+    public UpdateItemResponse UpdateItem(UpdateItemRequest request)
     {
-        var root = request.RootElement;
-        var tableName = root.GetProperty("TableName").GetString()!;
-        var table = tableStore.GetTable(tableName);
-        var key = DeserializeItem(root.GetProperty("Key"));
+        var table = tableStore.GetTable(request.TableName);
 
-        string? returnValues = null;
-        if (root.TryGetProperty("ReturnValues", out var rv))
-            returnValues = rv.GetString();
-
-        var existingItem = itemStore.GetItem(tableName, key);
-        EvaluateConditionExpression(root, existingItem);
-        if (root.TryGetProperty("Expected", out var exp))
-            PreExpressionRequestParser.EvaluateExpected(exp, root, existingItem);
+        var existingItem = itemStore.GetItem(request.TableName, request.Key);
+        EvaluateConditionExpression(request.ConditionExpression, request.ExpressionAttributeNames,
+            request.ExpressionAttributeValues, existingItem);
+        if (request.Expected is JsonElement exp)
+            PreExpressionRequestParser.EvaluateExpected(exp, request.ConditionalOperator, existingItem);
 
         // Build item (upsert: create with key if doesn't exist)
         var item = existingItem ?? new Dictionary<string, AttributeValue>();
         if (existingItem == null)
         {
-            // Add key attributes for new item
-            foreach (var kv in key)
+            foreach (var kv in request.Key)
                 item[kv.Key] = kv.Value.DeepClone();
         }
 
         // Capture old values for UPDATED_OLD
-        var oldItem = existingItem != null ? existingItem.CloneItem() : null;
+        var oldItem = existingItem?.CloneItem();
 
         // UpdateExpression (expression format) or AttributeUpdates (pre-expression format)
-        if (root.TryGetProperty("UpdateExpression", out var ue))
+        if (request.UpdateExpression != null)
         {
-            var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
-                ? DeserializeStringMap(ean) : null;
-            var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
-                ? DeserializeItem(eav) : null;
-
-            var actions = DynamoDbExpressionParser.ParseUpdate(ue.GetString()!, expressionAttributeNames);
-            var evaluator = new UpdateEvaluator(expressionAttributeValues);
+            var actions = DynamoDbExpressionParser.ParseUpdate(request.UpdateExpression, request.ExpressionAttributeNames);
+            var evaluator = new UpdateEvaluator(request.ExpressionAttributeValues);
             evaluator.Apply(actions, item);
         }
-        else if (root.TryGetProperty("AttributeUpdates", out var au))
+        else if (request.AttributeUpdates is JsonElement au)
         {
             PreExpressionRequestParser.ApplyAttributeUpdates(au, item);
         }
 
-        itemStore.PutItem(tableName, item);
+        itemStore.PutItem(request.TableName, item);
 
         // Determine return value
-        Dictionary<string, AttributeValue>? returnItem = returnValues switch
+        Dictionary<string, AttributeValue>? returnItem = request.ReturnValues switch
         {
             "ALL_OLD" => oldItem,
             "ALL_NEW" => item.CloneItem(),
@@ -141,20 +109,19 @@ public sealed class ItemOperations(ITableStore tableStore, IItemStore itemStore)
             _ => null
         };
 
-        return BuildItemResponse(returnItem);
+        return new UpdateItemResponse { Attributes = returnItem };
     }
 
-    private static void EvaluateConditionExpression(JsonElement root, Dictionary<string, AttributeValue>? existingItem)
+    private static void EvaluateConditionExpression(
+        string? conditionExpression,
+        Dictionary<string, string>? expressionAttributeNames,
+        Dictionary<string, AttributeValue>? expressionAttributeValues,
+        Dictionary<string, AttributeValue>? existingItem)
     {
-        if (!root.TryGetProperty("ConditionExpression", out var ce))
+        if (conditionExpression == null)
             return;
 
-        var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
-            ? DeserializeStringMap(ean) : null;
-        var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
-            ? DeserializeItem(eav) : null;
-
-        var ast = DynamoDbExpressionParser.ParseCondition(ce.GetString()!, expressionAttributeNames);
+        var ast = DynamoDbExpressionParser.ParseCondition(conditionExpression, expressionAttributeNames);
         var evaluator = new ConditionEvaluator(expressionAttributeValues);
 
         var itemToCheck = existingItem ?? new Dictionary<string, AttributeValue>();
@@ -217,16 +184,6 @@ public sealed class ItemOperations(ITableStore tableStore, IItemStore itemStore)
 
     internal static AttributeValue DeserializeAttributeValue(JsonElement element) =>
         JsonSerializer.Deserialize<AttributeValue>(element.GetRawText(), JsonOptions)!;
-
-    internal static Dictionary<string, string> DeserializeStringMap(JsonElement element)
-    {
-        var map = new Dictionary<string, string>();
-        foreach (var prop in element.EnumerateObject())
-        {
-            map[prop.Name] = prop.Value.GetString()!;
-        }
-        return map;
-    }
 
     internal static void ValidateKeyAttributes(Dictionary<string, AttributeValue> item, TableDefinition table)
     {
@@ -309,59 +266,4 @@ public sealed class ItemOperations(ITableStore tableStore, IItemStore itemStore)
             current.M[lastAttr.Name] = value.DeepClone();
         }
     }
-
-    internal static JsonDocument BuildItemResponse(Dictionary<string, AttributeValue>? attributes)
-    {
-        using var stream = new MemoryStream();
-        using var writer = new Utf8JsonWriter(stream);
-        writer.WriteStartObject();
-        if (attributes != null)
-        {
-            writer.WritePropertyName("Attributes");
-            WriteItem(writer, attributes);
-        }
-        writer.WriteEndObject();
-        writer.Flush();
-        return JsonDocument.Parse(stream.ToArray());
-    }
-
-    internal static JsonDocument BuildGetItemResponse(Dictionary<string, AttributeValue> item)
-    {
-        using var stream = new MemoryStream();
-        using var writer = new Utf8JsonWriter(stream);
-        writer.WriteStartObject();
-        writer.WritePropertyName("Item");
-        WriteItem(writer, item);
-        writer.WriteEndObject();
-        writer.Flush();
-        return JsonDocument.Parse(stream.ToArray());
-    }
-
-    internal static JsonDocument BuildEmptyResponse()
-    {
-        using var stream = new MemoryStream();
-        using var writer = new Utf8JsonWriter(stream);
-        writer.WriteStartObject();
-        writer.WriteEndObject();
-        writer.Flush();
-        return JsonDocument.Parse(stream.ToArray());
-    }
-
-    internal static void WriteItem(Utf8JsonWriter writer, Dictionary<string, AttributeValue> item)
-    {
-        var json = JsonSerializer.Serialize(item, JsonOptions);
-        using var doc = JsonDocument.Parse(json);
-        doc.RootElement.WriteTo(writer);
-    }
-
-    internal static void WriteItemsList(Utf8JsonWriter writer, List<Dictionary<string, AttributeValue>> items)
-    {
-        writer.WriteStartArray();
-        foreach (var item in items)
-        {
-            WriteItem(writer, item);
-        }
-        writer.WriteEndArray();
-    }
-
 }
