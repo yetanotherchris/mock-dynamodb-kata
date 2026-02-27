@@ -4,17 +4,8 @@ using MockDynamoDB.Core.Storage;
 
 namespace MockDynamoDB.Core.Operations;
 
-public class BatchOperations
+public sealed class BatchOperations(ITableStore tableStore, IItemStore itemStore)
 {
-    private readonly ITableStore _tableStore;
-    private readonly IItemStore _itemStore;
-
-    public BatchOperations(ITableStore tableStore, IItemStore itemStore)
-    {
-        _tableStore = tableStore;
-        _itemStore = itemStore;
-    }
-
     public JsonDocument BatchGetItem(JsonDocument request)
     {
         var root = request.RootElement;
@@ -26,7 +17,7 @@ public class BatchOperations
         foreach (var tableProp in requestItems.EnumerateObject())
         {
             var tableName = tableProp.Name;
-            _tableStore.GetTable(tableName); // validate table exists
+            tableStore.GetTable(tableName); // validate table exists
 
             var keysAndAttributes = tableProp.Value;
             var keys = keysAndAttributes.GetProperty("Keys");
@@ -48,7 +39,7 @@ public class BatchOperations
                     throw new ValidationException("Too many items requested for the BatchGetItem call");
 
                 var key = ItemOperations.DeserializeItem(keyElement);
-                var item = _itemStore.GetItem(tableName, key);
+                var item = itemStore.GetItem(tableName, key);
                 if (item != null)
                 {
                     if (projectionExpression != null)
@@ -74,7 +65,7 @@ public class BatchOperations
         foreach (var tableProp in requestItems.EnumerateObject())
         {
             var tableName = tableProp.Name;
-            _tableStore.GetTable(tableName);
+            tableStore.GetTable(tableName);
 
             var writeRequests = tableProp.Value;
             var seenKeys = new HashSet<string>();
@@ -90,7 +81,7 @@ public class BatchOperations
                 if (wr.TryGetProperty("PutRequest", out var put))
                 {
                     var item = ItemOperations.DeserializeItem(put.GetProperty("Item"));
-                    var table = _tableStore.GetTable(tableName);
+                    var table = tableStore.GetTable(tableName);
                     var key = ItemOperations.ExtractKey(item, table);
                     keyStr = SerializeKey(key);
                 }
@@ -113,19 +104,19 @@ public class BatchOperations
         foreach (var tableProp in requestItems.EnumerateObject())
         {
             var tableName = tableProp.Name;
-            var table = _tableStore.GetTable(tableName);
+            var table = tableStore.GetTable(tableName);
 
             foreach (var wr in tableProp.Value.EnumerateArray())
             {
                 if (wr.TryGetProperty("PutRequest", out var put))
                 {
                     var item = ItemOperations.DeserializeItem(put.GetProperty("Item"));
-                    _itemStore.PutItem(tableName, item);
+                    itemStore.PutItem(tableName, item);
                 }
                 else if (wr.TryGetProperty("DeleteRequest", out var del))
                 {
                     var key = ItemOperations.DeserializeItem(del.GetProperty("Key"));
-                    _itemStore.DeleteItem(tableName, key);
+                    itemStore.DeleteItem(tableName, key);
                 }
             }
         }

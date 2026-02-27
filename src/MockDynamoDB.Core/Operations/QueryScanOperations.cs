@@ -5,22 +5,13 @@ using MockDynamoDB.Core.Storage;
 
 namespace MockDynamoDB.Core.Operations;
 
-public class QueryScanOperations
+public sealed class QueryScanOperations(ITableStore tableStore, IItemStore itemStore)
 {
-    private readonly ITableStore _tableStore;
-    private readonly IItemStore _itemStore;
-
-    public QueryScanOperations(ITableStore tableStore, IItemStore itemStore)
-    {
-        _tableStore = tableStore;
-        _itemStore = itemStore;
-    }
-
     public JsonDocument Query(JsonDocument request)
     {
         var root = request.RootElement;
         var tableName = root.GetProperty("TableName").GetString()!;
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
 
         // Check for index query
         LocalSecondaryIndexDefinition? lsiDef = null;
@@ -64,9 +55,9 @@ public class QueryScanOperations
         // Get items by partition key
         List<Dictionary<string, AttributeValue>> items;
         if (indexName != null)
-            items = _itemStore.QueryByPartitionKeyOnIndex(tableName, indexName, table.HashKeyName, pkValue);
+            items = itemStore.QueryByPartitionKeyOnIndex(tableName, indexName, table.HashKeyName, pkValue);
         else
-            items = _itemStore.QueryByPartitionKey(tableName, table.HashKeyName, pkValue);
+            items = itemStore.QueryByPartitionKey(tableName, table.HashKeyName, pkValue);
 
         // Apply sort key condition
         if (skCondition != null && effectiveRangeKeyName != null)
@@ -146,14 +137,14 @@ public class QueryScanOperations
     {
         var root = request.RootElement;
         var tableName = root.GetProperty("TableName").GetString()!;
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
 
         var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
             ? ItemOperations.DeserializeStringMap(ean) : null;
         var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
             ? ItemOperations.DeserializeItem(eav) : null;
 
-        var items = _itemStore.GetAllItems(tableName);
+        var items = itemStore.GetAllItems(tableName);
 
         // Parallel scan: Segment / TotalSegments
         if (root.TryGetProperty("TotalSegments", out var ts))

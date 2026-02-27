@@ -5,19 +5,8 @@ using MockDynamoDB.Core.Storage;
 
 namespace MockDynamoDB.Core.Operations;
 
-public class TransactionOperations
+public sealed class TransactionOperations(ITableStore tableStore, IItemStore itemStore, ReaderWriterLockSlim rwLock)
 {
-    private readonly ITableStore _tableStore;
-    private readonly IItemStore _itemStore;
-    private readonly ReaderWriterLockSlim _lock;
-
-    public TransactionOperations(ITableStore tableStore, IItemStore itemStore, ReaderWriterLockSlim rwLock)
-    {
-        _tableStore = tableStore;
-        _itemStore = itemStore;
-        _lock = rwLock;
-    }
-
     public JsonDocument TransactWriteItems(JsonDocument request)
     {
         var root = request.RootElement;
@@ -36,7 +25,7 @@ public class TransactionOperations
                 throw new ValidationException("Transaction request cannot include multiple operations on one item");
         }
 
-        _lock.EnterWriteLock();
+        rwLock.EnterWriteLock();
         try
         {
             // Phase 1: Evaluate all conditions
@@ -62,7 +51,7 @@ public class TransactionOperations
         }
         finally
         {
-            _lock.ExitWriteLock();
+            rwLock.ExitWriteLock();
         }
 
         return ItemOperations.BuildEmptyResponse();
@@ -77,7 +66,7 @@ public class TransactionOperations
         if (items.Count > 100)
             throw new ValidationException("Member must have length less than or equal to 100");
 
-        _lock.EnterReadLock();
+        rwLock.EnterReadLock();
         try
         {
             var responses = new List<Dictionary<string, AttributeValue>?>();
@@ -86,10 +75,10 @@ public class TransactionOperations
             {
                 var get = item.GetProperty("Get");
                 var tableName = get.GetProperty("TableName").GetString()!;
-                _tableStore.GetTable(tableName);
+                tableStore.GetTable(tableName);
                 var key = ItemOperations.DeserializeItem(get.GetProperty("Key"));
 
-                var result = _itemStore.GetItem(tableName, key);
+                var result = itemStore.GetItem(tableName, key);
 
                 if (result != null && get.TryGetProperty("ProjectionExpression", out var pe))
                 {
@@ -105,7 +94,7 @@ public class TransactionOperations
         }
         finally
         {
-            _lock.ExitReadLock();
+            rwLock.ExitReadLock();
         }
     }
 
@@ -118,7 +107,7 @@ public class TransactionOperations
         if (item.TryGetProperty("Put", out op))
         {
             tableName = op.GetProperty("TableName").GetString()!;
-            var table = _tableStore.GetTable(tableName);
+            var table = tableStore.GetTable(tableName);
             var putItem = ItemOperations.DeserializeItem(op.GetProperty("Item"));
             var key = ItemOperations.ExtractKey(putItem, table);
             keyJson = JsonSerializer.Serialize(key, ItemOperations.JsonOptions);
@@ -168,7 +157,7 @@ public class TransactionOperations
             return new CancellationReason { Code = "None" };
 
         var tableName = op.GetProperty("TableName").GetString()!;
-        _tableStore.GetTable(tableName);
+        tableStore.GetTable(tableName);
 
         Dictionary<string, AttributeValue> key;
         if (op.TryGetProperty("Key", out var keyProp))
@@ -177,7 +166,7 @@ public class TransactionOperations
         }
         else if (op.TryGetProperty("Item", out var itemProp))
         {
-            var table = _tableStore.GetTable(tableName);
+            var table = tableStore.GetTable(tableName);
             var putItem = ItemOperations.DeserializeItem(itemProp);
             key = ItemOperations.ExtractKey(putItem, table);
         }
@@ -186,7 +175,7 @@ public class TransactionOperations
             return new CancellationReason { Code = "None" };
         }
 
-        var existingItem = _itemStore.GetItem(tableName, key);
+        var existingItem = itemStore.GetItem(tableName, key);
 
         var expressionAttributeNames = op.TryGetProperty("ExpressionAttributeNames", out var ean)
             ? ItemOperations.DeserializeStringMap(ean) : null;
@@ -215,21 +204,21 @@ public class TransactionOperations
         {
             var tableName = put.GetProperty("TableName").GetString()!;
             var putItem = ItemOperations.DeserializeItem(put.GetProperty("Item"));
-            _itemStore.PutItem(tableName, putItem);
+            itemStore.PutItem(tableName, putItem);
         }
         else if (item.TryGetProperty("Delete", out var del))
         {
             var tableName = del.GetProperty("TableName").GetString()!;
             var key = ItemOperations.DeserializeItem(del.GetProperty("Key"));
-            _itemStore.DeleteItem(tableName, key);
+            itemStore.DeleteItem(tableName, key);
         }
         else if (item.TryGetProperty("Update", out var upd))
         {
             var tableName = upd.GetProperty("TableName").GetString()!;
-            var table = _tableStore.GetTable(tableName);
+            var table = tableStore.GetTable(tableName);
             var key = ItemOperations.DeserializeItem(upd.GetProperty("Key"));
 
-            var existingItem = _itemStore.GetItem(tableName, key);
+            var existingItem = itemStore.GetItem(tableName, key);
             var updateItem = existingItem ?? new Dictionary<string, AttributeValue>();
             if (existingItem == null)
             {
@@ -249,7 +238,7 @@ public class TransactionOperations
                 evaluator.Apply(actions, updateItem);
             }
 
-            _itemStore.PutItem(tableName, updateItem);
+            itemStore.PutItem(tableName, updateItem);
         }
         // ConditionCheck has no write side-effect
     }

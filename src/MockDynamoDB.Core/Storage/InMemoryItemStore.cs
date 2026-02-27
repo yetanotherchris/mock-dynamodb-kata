@@ -3,15 +3,9 @@ using MockDynamoDB.Core.Models;
 
 namespace MockDynamoDB.Core.Storage;
 
-public class InMemoryItemStore : IItemStore
+public sealed class InMemoryItemStore(ITableStore tableStore) : IItemStore
 {
     private readonly ConcurrentDictionary<string, TableData> _tables = new();
-    private readonly ITableStore _tableStore;
-
-    public InMemoryItemStore(ITableStore tableStore)
-    {
-        _tableStore = tableStore;
-    }
 
     public void EnsureTable(string tableName)
     {
@@ -25,7 +19,7 @@ public class InMemoryItemStore : IItemStore
 
     public void PutItem(string tableName, Dictionary<string, AttributeValue> item)
     {
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
         var data = GetTableData(tableName);
         var pkValue = GetKeyString(item, table.HashKeyName);
         var skValue = table.HasRangeKey ? GetKeyString(item, table.RangeKeyName!) : "";
@@ -57,7 +51,7 @@ public class InMemoryItemStore : IItemStore
 
     public Dictionary<string, AttributeValue>? GetItem(string tableName, Dictionary<string, AttributeValue> key)
     {
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
         var data = GetTableData(tableName);
         var pkValue = GetKeyString(key, table.HashKeyName);
         var skValue = table.HasRangeKey ? GetKeyString(key, table.RangeKeyName!) : "";
@@ -73,7 +67,7 @@ public class InMemoryItemStore : IItemStore
 
     public Dictionary<string, AttributeValue>? DeleteItem(string tableName, Dictionary<string, AttributeValue> key)
     {
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
         var data = GetTableData(tableName);
         var pkValue = GetKeyString(key, table.HashKeyName);
         var skValue = table.HasRangeKey ? GetKeyString(key, table.RangeKeyName!) : "";
@@ -158,7 +152,7 @@ public class InMemoryItemStore : IItemStore
     {
         try
         {
-            var table = _tableStore.GetTable(tableName);
+            var table = tableStore.GetTable(tableName);
             var data = GetTableData(tableName);
             long count = 0;
             foreach (var partition in data.Partitions.Values)

@@ -5,26 +5,18 @@ using MockDynamoDB.Core.Storage;
 
 namespace MockDynamoDB.Core.Operations;
 
-public class ItemOperations
+public sealed class ItemOperations(ITableStore tableStore, IItemStore itemStore)
 {
-    private readonly ITableStore _tableStore;
-    private readonly IItemStore _itemStore;
     internal static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null
     };
 
-    public ItemOperations(ITableStore tableStore, IItemStore itemStore)
-    {
-        _tableStore = tableStore;
-        _itemStore = itemStore;
-    }
-
     public JsonDocument PutItem(JsonDocument request)
     {
         var root = request.RootElement;
         var tableName = root.GetProperty("TableName").GetString()!;
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
         var item = DeserializeItem(root.GetProperty("Item"));
 
         ValidateKeyAttributes(item, table);
@@ -34,13 +26,13 @@ public class ItemOperations
             returnValues = rv.GetString();
 
         var key = ExtractKey(item, table);
-        var oldItem = _itemStore.GetItem(tableName, key);
+        var oldItem = itemStore.GetItem(tableName, key);
 
         EvaluateConditionExpression(root, oldItem);
         if (root.TryGetProperty("Expected", out var exp))
             PreExpressionRequestParser.EvaluateExpected(exp, root, oldItem);
 
-        _itemStore.PutItem(tableName, item);
+        itemStore.PutItem(tableName, item);
 
         return BuildItemResponse(returnValues == "ALL_OLD" ? oldItem : null);
     }
@@ -49,10 +41,10 @@ public class ItemOperations
     {
         var root = request.RootElement;
         var tableName = root.GetProperty("TableName").GetString()!;
-        _tableStore.GetTable(tableName);
+        tableStore.GetTable(tableName);
         var key = DeserializeItem(root.GetProperty("Key"));
 
-        var item = _itemStore.GetItem(tableName, key);
+        var item = itemStore.GetItem(tableName, key);
 
         if (item == null)
             return BuildEmptyResponse();
@@ -75,19 +67,19 @@ public class ItemOperations
     {
         var root = request.RootElement;
         var tableName = root.GetProperty("TableName").GetString()!;
-        _tableStore.GetTable(tableName);
+        tableStore.GetTable(tableName);
         var key = DeserializeItem(root.GetProperty("Key"));
 
         string? returnValues = null;
         if (root.TryGetProperty("ReturnValues", out var rv))
             returnValues = rv.GetString();
 
-        var oldItem = _itemStore.GetItem(tableName, key);
+        var oldItem = itemStore.GetItem(tableName, key);
         EvaluateConditionExpression(root, oldItem);
         if (root.TryGetProperty("Expected", out var exp))
             PreExpressionRequestParser.EvaluateExpected(exp, root, oldItem);
 
-        var deleted = _itemStore.DeleteItem(tableName, key);
+        var deleted = itemStore.DeleteItem(tableName, key);
 
         return BuildItemResponse(returnValues == "ALL_OLD" ? deleted : null);
     }
@@ -96,14 +88,14 @@ public class ItemOperations
     {
         var root = request.RootElement;
         var tableName = root.GetProperty("TableName").GetString()!;
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
         var key = DeserializeItem(root.GetProperty("Key"));
 
         string? returnValues = null;
         if (root.TryGetProperty("ReturnValues", out var rv))
             returnValues = rv.GetString();
 
-        var existingItem = _itemStore.GetItem(tableName, key);
+        var existingItem = itemStore.GetItem(tableName, key);
         EvaluateConditionExpression(root, existingItem);
         if (root.TryGetProperty("Expected", out var exp))
             PreExpressionRequestParser.EvaluateExpected(exp, root, existingItem);
@@ -137,7 +129,7 @@ public class ItemOperations
             PreExpressionRequestParser.ApplyAttributeUpdates(au, item);
         }
 
-        _itemStore.PutItem(tableName, item);
+        itemStore.PutItem(tableName, item);
 
         // Determine return value
         Dictionary<string, AttributeValue>? returnItem = returnValues switch
