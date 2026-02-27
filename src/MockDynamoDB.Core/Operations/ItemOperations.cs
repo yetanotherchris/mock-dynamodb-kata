@@ -37,6 +37,8 @@ public class ItemOperations
         var oldItem = _itemStore.GetItem(tableName, key);
 
         EvaluateConditionExpression(root, oldItem);
+        if (root.TryGetProperty("Expected", out var exp))
+            PreExpressionRequestParser.EvaluateExpected(exp, root, oldItem);
 
         _itemStore.PutItem(tableName, item);
 
@@ -82,6 +84,8 @@ public class ItemOperations
 
         var oldItem = _itemStore.GetItem(tableName, key);
         EvaluateConditionExpression(root, oldItem);
+        if (root.TryGetProperty("Expected", out var exp))
+            PreExpressionRequestParser.EvaluateExpected(exp, root, oldItem);
 
         var deleted = _itemStore.DeleteItem(tableName, key);
 
@@ -101,6 +105,8 @@ public class ItemOperations
 
         var existingItem = _itemStore.GetItem(tableName, key);
         EvaluateConditionExpression(root, existingItem);
+        if (root.TryGetProperty("Expected", out var exp))
+            PreExpressionRequestParser.EvaluateExpected(exp, root, existingItem);
 
         // Build item (upsert: create with key if doesn't exist)
         var item = existingItem ?? new Dictionary<string, AttributeValue>();
@@ -114,7 +120,7 @@ public class ItemOperations
         // Capture old values for UPDATED_OLD
         var oldItem = existingItem != null ? CloneItem(existingItem) : null;
 
-        // Parse and apply update expression
+        // UpdateExpression (expression format) or AttributeUpdates (pre-expression format)
         if (root.TryGetProperty("UpdateExpression", out var ue))
         {
             var expressionAttributeNames = root.TryGetProperty("ExpressionAttributeNames", out var ean)
@@ -125,6 +131,10 @@ public class ItemOperations
             var actions = DynamoDbExpressionParser.ParseUpdate(ue.GetString()!, expressionAttributeNames);
             var evaluator = new UpdateEvaluator(expressionAttributeValues);
             evaluator.Apply(actions, item);
+        }
+        else if (root.TryGetProperty("AttributeUpdates", out var au))
+        {
+            PreExpressionRequestParser.ApplyAttributeUpdates(au, item);
         }
 
         _itemStore.PutItem(tableName, item);

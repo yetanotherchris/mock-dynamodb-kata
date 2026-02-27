@@ -44,7 +44,7 @@ public class QueryScanOperations
         var expressionAttributeValues = root.TryGetProperty("ExpressionAttributeValues", out var eav)
             ? ItemOperations.DeserializeItem(eav) : null;
 
-        // Parse KeyConditionExpression or legacy KeyConditions
+        // Parse KeyConditionExpression (expression format) or KeyConditions (pre-expression format)
         AttributeValue pkValue;
         SortKeyCondition? skCondition;
 
@@ -54,7 +54,7 @@ public class QueryScanOperations
         }
         else if (root.TryGetProperty("KeyConditions", out var keyConditions))
         {
-            (pkValue, skCondition) = ParseLegacyKeyConditions(keyConditions, effectiveHashKeyName, effectiveRangeKeyName);
+            (pkValue, skCondition) = PreExpressionRequestParser.ParseKeyConditions(keyConditions, effectiveHashKeyName, effectiveRangeKeyName);
         }
         else
         {
@@ -111,12 +111,18 @@ public class QueryScanOperations
         }
         scannedCount = items.Count;
 
-        // FilterExpression
+        // FilterExpression (expression format) or QueryFilter (pre-expression format)
         if (root.TryGetProperty("FilterExpression", out var fe))
         {
             var ast = DynamoDbExpressionParser.ParseCondition(fe.GetString()!, expressionAttributeNames);
             var evaluator = new ConditionEvaluator(expressionAttributeValues);
             items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
+        }
+        else if (root.TryGetProperty("QueryFilter", out var qf))
+        {
+            bool useOr = root.TryGetProperty("ConditionalOperator", out var co) && co.GetString() == "OR";
+            var predicate = PreExpressionRequestParser.ParseFilterConditions(qf, useOr);
+            items = items.Where(predicate).ToList();
         }
 
         // Select = COUNT
@@ -186,12 +192,18 @@ public class QueryScanOperations
         }
         int scannedCount = items.Count;
 
-        // FilterExpression
+        // FilterExpression (expression format) or ScanFilter (pre-expression format)
         if (root.TryGetProperty("FilterExpression", out var fe))
         {
             var ast = DynamoDbExpressionParser.ParseCondition(fe.GetString()!, expressionAttributeNames);
             var evaluator = new ConditionEvaluator(expressionAttributeValues);
             items = items.Where(item => evaluator.Evaluate(ast, item)).ToList();
+        }
+        else if (root.TryGetProperty("ScanFilter", out var sf))
+        {
+            bool useOr = root.TryGetProperty("ConditionalOperator", out var co) && co.GetString() == "OR";
+            var predicate = PreExpressionRequestParser.ParseFilterConditions(sf, useOr);
+            items = items.Where(predicate).ToList();
         }
 
         // Select
@@ -208,55 +220,6 @@ public class QueryScanOperations
             items = items.Select(item => ItemOperations.ApplyProjection(item, projectionExpression, expressionAttributeNames)).ToList();
 
         return BuildQueryScanResponse(items, scannedCount, hasMore ? items : null, table, select);
-    }
-
-    private (AttributeValue pkValue, SortKeyCondition? skCondition) ParseLegacyKeyConditions(
-        JsonElement keyConditions,
-        string hashKeyName,
-        string? rangeKeyName)
-    {
-        AttributeValue? pkValue = null;
-        SortKeyCondition? skCondition = null;
-
-        foreach (var prop in keyConditions.EnumerateObject())
-        {
-            var attrName = prop.Name;
-            var condition = prop.Value;
-            var op = condition.GetProperty("ComparisonOperator").GetString()!;
-            var valueList = condition.GetProperty("AttributeValueList");
-            var firstValue = ItemOperations.DeserializeAttributeValue(valueList[0]);
-
-            if (attrName == hashKeyName)
-            {
-                if (op != "EQ")
-                    throw new ValidationException("Query key condition not supported");
-                pkValue = firstValue;
-            }
-            else if (attrName == rangeKeyName)
-            {
-                skCondition = op switch
-                {
-                    "EQ" => new SortKeyCondition { Operator = "=", Value = firstValue },
-                    "LE" => new SortKeyCondition { Operator = "<=", Value = firstValue },
-                    "LT" => new SortKeyCondition { Operator = "<", Value = firstValue },
-                    "GE" => new SortKeyCondition { Operator = ">=", Value = firstValue },
-                    "GT" => new SortKeyCondition { Operator = ">", Value = firstValue },
-                    "BEGINS_WITH" => new SortKeyCondition { Operator = "begins_with", Value = firstValue },
-                    "BETWEEN" => new SortKeyCondition
-                    {
-                        Operator = "BETWEEN",
-                        Value = firstValue,
-                        Value2 = ItemOperations.DeserializeAttributeValue(valueList[1])
-                    },
-                    _ => throw new ValidationException($"Unsupported ComparisonOperator: {op}")
-                };
-            }
-        }
-
-        if (pkValue == null)
-            throw new ValidationException("Query condition missed key schema element: " + hashKeyName);
-
-        return (pkValue, skCondition);
     }
 
     private (AttributeValue pkValue, SortKeyCondition? skCondition) ParseKeyCondition(
@@ -463,12 +426,5 @@ public class QueryScanOperations
             hash *= fnvPrime;
         }
         return hash;
-    }
-
-    private class SortKeyCondition
-    {
-        public string Operator { get; set; } = "";
-        public AttributeValue? Value { get; set; }
-        public AttributeValue? Value2 { get; set; } // for BETWEEN
     }
 }
