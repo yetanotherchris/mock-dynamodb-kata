@@ -21,40 +21,40 @@ public class TableDefinition
     public string TableArn => $"arn:aws:dynamodb:us-east-1:000000000000:table/{TableName}";
 }
 
-public class KeySchemaElement
+public record KeySchemaElement
 {
-    public required string AttributeName { get; set; }
-    public required string KeyType { get; set; }
+    public required string AttributeName { get; init; }
+    public required string KeyType { get; init; }
 }
 
-public class AttributeDefinition
+public record AttributeDefinition
 {
-    public required string AttributeName { get; set; }
-    public required string AttributeType { get; set; }
+    public required string AttributeName { get; init; }
+    public required string AttributeType { get; init; }
 }
 
-public class LocalSecondaryIndexDefinition
+public record LocalSecondaryIndexDefinition
 {
-    public required string IndexName { get; set; }
-    public required List<KeySchemaElement> KeySchema { get; set; }
-    public required ProjectionDefinition Projection { get; set; }
+    public required string IndexName { get; init; }
+    public required List<KeySchemaElement> KeySchema { get; init; }
+    public required ProjectionDefinition Projection { get; init; }
 
     public string HashKeyName => KeySchema.First(k => k.KeyType == "HASH").AttributeName;
     public string RangeKeyName => KeySchema.First(k => k.KeyType == "RANGE").AttributeName;
 }
 
-public class GlobalSecondaryIndexDefinition
+public record GlobalSecondaryIndexDefinition
 {
-    public required string IndexName { get; set; }
-    public required List<KeySchemaElement> KeySchema { get; set; }
-    public required ProjectionDefinition Projection { get; set; }
+    public required string IndexName { get; init; }
+    public required List<KeySchemaElement> KeySchema { get; init; }
+    public required ProjectionDefinition Projection { get; init; }
 
     public string HashKeyName => KeySchema.First(k => k.KeyType == "HASH").AttributeName;
     public string? RangeKeyName => KeySchema.FirstOrDefault(k => k.KeyType == "RANGE")?.AttributeName;
 }
 
-public class ProjectionDefinition
+public record ProjectionDefinition
 {
-    public string ProjectionType { get; set; } = "ALL";
-    public List<string>? NonKeyAttributes { get; set; }
+    public string ProjectionType { get; init; } = "ALL";
+    public List<string>? NonKeyAttributes { get; init; }
 }

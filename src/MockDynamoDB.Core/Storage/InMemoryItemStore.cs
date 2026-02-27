@@ -3,15 +3,9 @@ using MockDynamoDB.Core.Models;
 
 namespace MockDynamoDB.Core.Storage;
 
-public class InMemoryItemStore : IItemStore
+public sealed class InMemoryItemStore(ITableStore tableStore) : IItemStore
 {
     private readonly ConcurrentDictionary<string, TableData> _tables = new();
-    private readonly ITableStore _tableStore;
-
-    public InMemoryItemStore(ITableStore tableStore)
-    {
-        _tableStore = tableStore;
-    }
 
     public void EnsureTable(string tableName)
     {
@@ -25,7 +19,7 @@ public class InMemoryItemStore : IItemStore
 
     public void PutItem(string tableName, Dictionary<string, AttributeValue> item)
     {
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
         var data = GetTableData(tableName);
         var pkValue = GetKeyString(item, table.HashKeyName);
         var skValue = table.HasRangeKey ? GetKeyString(item, table.RangeKeyName!) : "";
@@ -36,7 +30,7 @@ public class InMemoryItemStore : IItemStore
         lock (partition)
         {
             partition.TryGetValue(skValue, out oldItem);
-            var cloned = CloneItem(item);
+            var cloned = item.CloneItem();
             partition[skValue] = cloned;
         }
 
@@ -57,7 +51,7 @@ public class InMemoryItemStore : IItemStore
 
     public Dictionary<string, AttributeValue>? GetItem(string tableName, Dictionary<string, AttributeValue> key)
     {
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
         var data = GetTableData(tableName);
         var pkValue = GetKeyString(key, table.HashKeyName);
         var skValue = table.HasRangeKey ? GetKeyString(key, table.RangeKeyName!) : "";
@@ -67,13 +61,13 @@ public class InMemoryItemStore : IItemStore
 
         lock (partition)
         {
-            return partition.TryGetValue(skValue, out var item) ? CloneItem(item) : null;
+            return partition.TryGetValue(skValue, out var item) ? item.CloneItem() : null;
         }
     }
 
     public Dictionary<string, AttributeValue>? DeleteItem(string tableName, Dictionary<string, AttributeValue> key)
     {
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
         var data = GetTableData(tableName);
         var pkValue = GetKeyString(key, table.HashKeyName);
         var skValue = table.HasRangeKey ? GetKeyString(key, table.RangeKeyName!) : "";
@@ -106,7 +100,7 @@ public class InMemoryItemStore : IItemStore
         }
 
         UpdateTableMetrics(tableName);
-        return CloneItem(existing);
+        return existing.CloneItem();
     }
 
     public List<Dictionary<string, AttributeValue>> GetAllItems(string tableName)
@@ -120,7 +114,7 @@ public class InMemoryItemStore : IItemStore
             {
                 foreach (var item in pkEntry.Value.Values)
                 {
-                    result.Add(CloneItem(item));
+                    result.Add(item.CloneItem());
                 }
             }
         }
@@ -138,7 +132,7 @@ public class InMemoryItemStore : IItemStore
 
         lock (partition)
         {
-            return partition.Values.Select(CloneItem).ToList();
+            return partition.Values.Select(v => v.CloneItem()).ToList();
         }
     }
 
@@ -158,7 +152,7 @@ public class InMemoryItemStore : IItemStore
     {
         try
         {
-            var table = _tableStore.GetTable(tableName);
+            var table = tableStore.GetTable(tableName);
             var data = GetTableData(tableName);
             long count = 0;
             foreach (var partition in data.Partitions.Values)
@@ -202,11 +196,6 @@ public class InMemoryItemStore : IItemStore
         return n;
     }
 
-    private static Dictionary<string, AttributeValue> CloneItem(Dictionary<string, AttributeValue> item)
-    {
-        return item.ToDictionary(kv => kv.Key, kv => kv.Value.DeepClone());
-    }
-
     public List<Dictionary<string, AttributeValue>> QueryByPartitionKeyOnIndex(
         string tableName, string indexName, string pkName, AttributeValue pkValue)
     {
@@ -221,7 +210,7 @@ public class InMemoryItemStore : IItemStore
 
         lock (partition)
         {
-            return partition.Values.Select(CloneItem).ToList();
+            return partition.Values.Select(v => v.CloneItem()).ToList();
         }
     }
 
@@ -260,7 +249,7 @@ public class InMemoryItemStore : IItemStore
                 _ => new SortedList<string, Dictionary<string, AttributeValue>>(StringComparer.Ordinal));
             lock (partition)
             {
-                partition[compositeKey] = CloneItem(newItem);
+                partition[compositeKey] = newItem.CloneItem();
             }
         }
     }
@@ -330,7 +319,7 @@ public class InMemoryItemStore : IItemStore
                 _ => new SortedList<string, Dictionary<string, AttributeValue>>(StringComparer.Ordinal));
             lock (partition)
             {
-                partition[compositeKey] = CloneItem(newItem);
+                partition[compositeKey] = newItem.CloneItem();
             }
         }
     }

@@ -4,17 +4,8 @@ using MockDynamoDB.Core.Storage;
 
 namespace MockDynamoDB.Core.Operations;
 
-public class TableOperations
+public sealed class TableOperations(ITableStore tableStore, IItemStore itemStore)
 {
-    private readonly ITableStore _tableStore;
-    private readonly IItemStore _itemStore;
-
-    public TableOperations(ITableStore tableStore, IItemStore itemStore)
-    {
-        _tableStore = tableStore;
-        _itemStore = itemStore;
-    }
-
     public JsonDocument CreateTable(JsonDocument request)
     {
         var root = request.RootElement;
@@ -42,8 +33,8 @@ public class TableOperations
             table.GlobalSecondaryIndexes = ParseGlobalSecondaryIndexes(gsiProp, attrDefs);
         }
 
-        _tableStore.CreateTable(table);
-        _itemStore.EnsureTable(tableName);
+        tableStore.CreateTable(table);
+        itemStore.EnsureTable(tableName);
 
         return BuildTableDescriptionResponse("TableDescription", table);
     }
@@ -51,8 +42,8 @@ public class TableOperations
     public JsonDocument DeleteTable(JsonDocument request)
     {
         var tableName = request.RootElement.GetProperty("TableName").GetString()!;
-        var table = _tableStore.DeleteTable(tableName);
-        _itemStore.RemoveTable(tableName);
+        var table = tableStore.DeleteTable(tableName);
+        itemStore.RemoveTable(tableName);
         table.TableStatus = "DELETING";
         return BuildTableDescriptionResponse("TableDescription", table);
     }
@@ -60,14 +51,14 @@ public class TableOperations
     public JsonDocument DescribeTable(JsonDocument request)
     {
         var tableName = request.RootElement.GetProperty("TableName").GetString()!;
-        var table = _tableStore.GetTable(tableName);
+        var table = tableStore.GetTable(tableName);
         return BuildTableDescriptionResponse("Table", table);
     }
 
     public JsonDocument ListTables(JsonDocument request)
     {
         var root = request.RootElement;
-        var allNames = _tableStore.ListTableNames();
+        var allNames = tableStore.ListTableNames();
 
         string? startTableName = null;
         int? limit = null;
@@ -212,12 +203,13 @@ public class TableOperations
 
     private static ProjectionDefinition ParseProjection(JsonElement element)
     {
-        var projection = new ProjectionDefinition();
-        if (element.TryGetProperty("ProjectionType", out var pt))
-            projection.ProjectionType = pt.GetString()!;
-        if (element.TryGetProperty("NonKeyAttributes", out var nka))
-            projection.NonKeyAttributes = nka.EnumerateArray().Select(e => e.GetString()!).ToList();
-        return projection;
+        return new ProjectionDefinition
+        {
+            ProjectionType = element.TryGetProperty("ProjectionType", out var pt) ? pt.GetString()! : "ALL",
+            NonKeyAttributes = element.TryGetProperty("NonKeyAttributes", out var nka)
+                ? nka.EnumerateArray().Select(e => e.GetString()!).ToList()
+                : null
+        };
     }
 
     private static void ValidateKeySchemaAttributes(List<KeySchemaElement> keySchema, List<AttributeDefinition> attrDefs)

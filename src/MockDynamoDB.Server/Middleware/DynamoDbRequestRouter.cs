@@ -4,28 +4,14 @@ using MockDynamoDB.Core.Operations;
 
 namespace MockDynamoDB.Server.Middleware;
 
-public class DynamoDbRequestRouter
+public sealed class DynamoDbRequestRouter(
+    TableOperations tableOps,
+    ItemOperations itemOps,
+    QueryScanOperations queryScanOps,
+    BatchOperations batchOps,
+    TransactionOperations txOps)
 {
     private const string TargetPrefix = "DynamoDB_20120810.";
-    private readonly TableOperations _tableOps;
-    private readonly ItemOperations _itemOps;
-    private readonly QueryScanOperations _queryScanOps;
-    private readonly BatchOperations _batchOps;
-    private readonly TransactionOperations _txOps;
-
-    public DynamoDbRequestRouter(
-        TableOperations tableOps,
-        ItemOperations itemOps,
-        QueryScanOperations queryScanOps,
-        BatchOperations batchOps,
-        TransactionOperations txOps)
-    {
-        _tableOps = tableOps;
-        _itemOps = itemOps;
-        _queryScanOps = queryScanOps;
-        _batchOps = batchOps;
-        _txOps = txOps;
-    }
 
     public async Task HandleRequest(HttpContext context)
     {
@@ -92,20 +78,20 @@ public class DynamoDbRequestRouter
     {
         return operation switch
         {
-            "CreateTable" => _tableOps.CreateTable(body),
-            "DeleteTable" => _tableOps.DeleteTable(body),
-            "DescribeTable" => _tableOps.DescribeTable(body),
-            "ListTables" => _tableOps.ListTables(body),
-            "PutItem" => _itemOps.PutItem(body),
-            "GetItem" => _itemOps.GetItem(body),
-            "DeleteItem" => _itemOps.DeleteItem(body),
-            "UpdateItem" => _itemOps.UpdateItem(body),
-            "Query" => _queryScanOps.Query(body),
-            "Scan" => _queryScanOps.Scan(body),
-            "BatchGetItem" => _batchOps.BatchGetItem(body),
-            "BatchWriteItem" => _batchOps.BatchWriteItem(body),
-            "TransactWriteItems" => _txOps.TransactWriteItems(body),
-            "TransactGetItems" => _txOps.TransactGetItems(body),
+            "CreateTable" => tableOps.CreateTable(body),
+            "DeleteTable" => tableOps.DeleteTable(body),
+            "DescribeTable" => tableOps.DescribeTable(body),
+            "ListTables" => tableOps.ListTables(body),
+            "PutItem" => itemOps.PutItem(body),
+            "GetItem" => itemOps.GetItem(body),
+            "DeleteItem" => itemOps.DeleteItem(body),
+            "UpdateItem" => itemOps.UpdateItem(body),
+            "Query" => queryScanOps.Query(body),
+            "Scan" => queryScanOps.Scan(body),
+            "BatchGetItem" => batchOps.BatchGetItem(body),
+            "BatchWriteItem" => batchOps.BatchWriteItem(body),
+            "TransactWriteItems" => txOps.TransactWriteItems(body),
+            "TransactGetItems" => txOps.TransactGetItems(body),
             _ => throw new UnknownOperationException()
         };
     }

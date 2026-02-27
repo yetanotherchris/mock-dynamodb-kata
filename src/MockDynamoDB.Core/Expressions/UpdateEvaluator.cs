@@ -2,15 +2,8 @@ using MockDynamoDB.Core.Models;
 
 namespace MockDynamoDB.Core.Expressions;
 
-public class UpdateEvaluator
+public sealed class UpdateEvaluator(Dictionary<string, AttributeValue>? expressionAttributeValues)
 {
-    private readonly Dictionary<string, AttributeValue>? _expressionAttributeValues;
-
-    public UpdateEvaluator(Dictionary<string, AttributeValue>? expressionAttributeValues)
-    {
-        _expressionAttributeValues = expressionAttributeValues;
-    }
-
     public void Apply(List<UpdateAction> actions, Dictionary<string, AttributeValue> item)
     {
         foreach (var action in actions)
@@ -203,7 +196,7 @@ public class UpdateEvaluator
 
     private AttributeValue ResolveValuePlaceholder(string placeholder)
     {
-        if (_expressionAttributeValues == null || !_expressionAttributeValues.TryGetValue(placeholder, out var value))
+        if (expressionAttributeValues == null || !expressionAttributeValues.TryGetValue(placeholder, out var value))
             throw new ValidationException($"Value {placeholder} not found in ExpressionAttributeValues");
         return value.DeepClone();
     }

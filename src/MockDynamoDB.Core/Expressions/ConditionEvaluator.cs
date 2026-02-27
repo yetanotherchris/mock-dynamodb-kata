@@ -2,15 +2,8 @@ using MockDynamoDB.Core.Models;
 
 namespace MockDynamoDB.Core.Expressions;
 
-public class ConditionEvaluator
+public sealed class ConditionEvaluator(Dictionary<string, AttributeValue>? expressionAttributeValues)
 {
-    private readonly Dictionary<string, AttributeValue>? _expressionAttributeValues;
-
-    public ConditionEvaluator(Dictionary<string, AttributeValue>? expressionAttributeValues)
-    {
-        _expressionAttributeValues = expressionAttributeValues;
-    }
-
     public bool Evaluate(ExpressionNode node, Dictionary<string, AttributeValue> item)
     {
         return node switch
@@ -188,7 +181,7 @@ public class ConditionEvaluator
 
     private AttributeValue ResolveValuePlaceholder(string placeholder)
     {
-        if (_expressionAttributeValues == null || !_expressionAttributeValues.TryGetValue(placeholder, out var value))
+        if (expressionAttributeValues == null || !expressionAttributeValues.TryGetValue(placeholder, out var value))
             throw new ValidationException($"Value {placeholder} not found in ExpressionAttributeValues");
         return value;
     }

@@ -188,16 +188,8 @@ public class DocumentPath
     }
 }
 
-public abstract class PathElement { }
+public abstract record PathElement;
 
-public class AttributeElement : PathElement
-{
-    public string Name { get; }
-    public AttributeElement(string name) { Name = name; }
-}
+public sealed record AttributeElement(string Name) : PathElement;
 
-public class IndexElement : PathElement
-{
-    public int Index { get; }
-    public IndexElement(int index) { Index = index; }
-}
+public sealed record IndexElement(int Index) : PathElement;

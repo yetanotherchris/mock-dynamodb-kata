@@ -3,7 +3,7 @@ using MockDynamoDB.Core.Models;
 
 namespace MockDynamoDB.Core.Storage;
 
-public class InMemoryTableStore : ITableStore
+public sealed class InMemoryTableStore : ITableStore
 {
     private readonly ConcurrentDictionary<string, TableDefinition> _tables = new();
 
