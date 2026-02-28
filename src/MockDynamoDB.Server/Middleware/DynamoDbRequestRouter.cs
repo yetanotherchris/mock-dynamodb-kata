@@ -1,52 +1,30 @@
 using System.Text.Json;
 using MockDynamoDB.Core.Models;
-using MockDynamoDB.Core.Operations;
-
+using MockDynamoDB.Server.Commands;
 
 namespace MockDynamoDB.Server.Middleware;
 
-public sealed class DynamoDbRequestRouter(
-    TableOperations tableOps,
-    ItemOperations itemOps,
-    QueryScanOperations queryScanOps,
-    BatchOperations batchOps,
-    TransactionOperations txOps)
+public sealed class DynamoDbRequestRouter
 {
     private const string TargetPrefix = "DynamoDB_20120810.";
     private static readonly JsonSerializerOptions JsonOptions = DynamoDbJsonOptions.Options;
+    private readonly Dictionary<string, IDynamoDbCommand> _commands;
+
+    public DynamoDbRequestRouter(IEnumerable<IDynamoDbCommand> commands)
+    {
+        _commands = commands.ToDictionary(c => c.OperationName);
+    }
 
     public async Task HandleRequest(HttpContext context)
     {
         var operation = context.Request.Headers["X-Amz-Target"].FirstOrDefault()![TargetPrefix.Length..];
 
-        var result = operation switch
-        {
-            "CreateTable" => await Dispatch<CreateTableRequest, CreateTableResponse>(context.Request.Body, tableOps.CreateTable),
-            "DeleteTable" => await Dispatch<DeleteTableRequest, DeleteTableResponse>(context.Request.Body, tableOps.DeleteTable),
-            "DescribeTable" => await Dispatch<DescribeTableRequest, DescribeTableResponse>(context.Request.Body, tableOps.DescribeTable),
-            "ListTables" => await Dispatch<ListTablesRequest, ListTablesResponse>(context.Request.Body, tableOps.ListTables),
-            "PutItem" => await Dispatch<PutItemRequest, PutItemResponse>(context.Request.Body, itemOps.PutItem),
-            "GetItem" => await Dispatch<GetItemRequest, GetItemResponse>(context.Request.Body, itemOps.GetItem),
-            "DeleteItem" => await Dispatch<DeleteItemRequest, DeleteItemResponse>(context.Request.Body, itemOps.DeleteItem),
-            "UpdateItem" => await Dispatch<UpdateItemRequest, UpdateItemResponse>(context.Request.Body, itemOps.UpdateItem),
-            "Query" => await Dispatch<QueryRequest, QueryResponse>(context.Request.Body, queryScanOps.Query),
-            "Scan" => await Dispatch<ScanRequest, ScanResponse>(context.Request.Body, queryScanOps.Scan),
-            "BatchGetItem" => await Dispatch<BatchGetItemRequest, BatchGetItemResponse>(context.Request.Body, batchOps.BatchGetItem),
-            "BatchWriteItem" => await Dispatch<BatchWriteItemRequest, BatchWriteItemResponse>(context.Request.Body, batchOps.BatchWriteItem),
-            "TransactWriteItems" => await Dispatch<TransactWriteItemsRequest, TransactWriteItemsResponse>(context.Request.Body, txOps.TransactWriteItems),
-            "TransactGetItems" => await Dispatch<TransactGetItemsRequest, TransactGetItemsResponse>(context.Request.Body, txOps.TransactGetItems),
-            _ => throw new UnknownOperationException()
-        };
+        if (!_commands.TryGetValue(operation, out var command))
+            throw new UnknownOperationException();
 
+        var result = await command.HandleAsync(context.Request.Body, JsonOptions);
         context.Response.ContentType = "application/x-amz-json-1.0";
         context.Response.StatusCode = 200;
         await context.Response.Body.WriteAsync(result);
-    }
-
-    private static async Task<byte[]> Dispatch<TReq, TRes>(Stream body, Func<TReq, TRes> handler)
-    {
-        var request = await JsonSerializer.DeserializeAsync<TReq>(body, JsonOptions);
-        var response = handler(request!);
-        return JsonSerializer.SerializeToUtf8Bytes(response, JsonOptions);
     }
 }
