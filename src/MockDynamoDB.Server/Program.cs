@@ -1,8 +1,11 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using MockDynamoDB.Core.Operations;
 using MockDynamoDB.Core.Storage;
 using MockDynamoDB.Server.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddHealthChecks();
 
 builder.Services.AddSingleton<ITableStore, InMemoryTableStore>();
 builder.Services.AddSingleton<IItemStore, InMemoryItemStore>();
@@ -29,8 +32,19 @@ builder.WebHost.UseUrls($"http://*:{port}");
 
 var app = builder.Build();
 
+var healthCheckOptions = new HealthCheckOptions
+{
+    ResponseWriter = async (context, _) =>
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("""{"status":"ok","service":"mock-dynamodb"}""");
+    }
+};
+app.MapHealthChecks("/", healthCheckOptions);
+app.MapHealthChecks("/healthz", healthCheckOptions);
+
 var router = app.Services.GetRequiredService<DynamoDbRequestRouter>();
-app.Map("/", async context => await router.HandleRequest(context));
+app.MapPost("/", async context => await router.HandleRequest(context));
 
 app.Run();
 

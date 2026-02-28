@@ -16,13 +16,6 @@ public sealed class DynamoDbRequestRouter(
 
     public async Task HandleRequest(HttpContext context)
     {
-        if (context.Request.Method == "GET" && context.Request.Path == "/")
-        {
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync("""{"status":"ok","service":"mock-dynamodb"}""");
-            return;
-        }
-
         if (context.Request.Method != "POST" || context.Request.Path != "/")
         {
             context.Response.StatusCode = 404;
