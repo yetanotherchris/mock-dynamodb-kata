@@ -144,7 +144,7 @@ public sealed class DynamoDbValidationMiddleware(RequestDelegate next)
 
 **Why throw instead of writing errors directly?** The `DynamoDbErrorMiddleware` sits upstream and catches all `DynamoDbException` instances. By throwing, the validation middleware delegates error formatting to a single place. This eliminates the duplication where both the router and validation code independently format error responses.
 
-**Why `HttpContext.Items`?** This is ASP.NET Core's built-in mechanism for passing per-request data between middleware components. The router reads the operation name from `context.Items["DynamoDb.Operation"]` instead of re-parsing the header.
+**Why store in `HttpContext.Items`?** The validation middleware has already parsed the operation name — storing it avoids the router re-parsing the header. However, this is optional: the router can safely re-read and parse the header directly since the middleware has already validated it. The implementation may choose either approach.
 
 **404 for non-POST requests:** The 404 response for wrong method/path is not a DynamoDB error — it's an HTTP-level concern. Writing the status code directly (without throwing) is correct because `DynamoDbErrorMiddleware` should only handle DynamoDB-specific errors.
 
@@ -152,7 +152,7 @@ public sealed class DynamoDbValidationMiddleware(RequestDelegate next)
 
 ### `Middleware/DynamoDbRequestRouter.cs`
 
-The router is stripped to its single remaining responsibility: dispatch an operation name to the correct typed handler.
+The router is stripped to its single remaining responsibility: dispatch an operation name to the correct typed handler. It reads the `X-Amz-Target` header directly — the validation middleware has already ensured it's present and correctly prefixed, so parsing here is safe.
 
 ```csharp
 namespace MockDynamoDB.Server.Middleware;
@@ -164,28 +164,30 @@ public sealed class DynamoDbRequestRouter(
     BatchOperations batchOps,
     TransactionOperations txOps)
 {
+    private const string TargetPrefix = "DynamoDB_20120810.";
     private static readonly JsonSerializerOptions JsonOptions = DynamoDbJsonOptions.Options;
 
     public async Task HandleRequest(HttpContext context)
     {
-        var operation = (string)context.Items["DynamoDb.Operation"]!;
+        var body = context.Request.Body;
+        var operation = context.Request.Headers["X-Amz-Target"].FirstOrDefault()![TargetPrefix.Length..];
 
         var result = operation switch
         {
-            "CreateTable" => await Dispatch<CreateTableRequest, CreateTableResponse>(context.Request.Body, tableOps.CreateTable),
-            "DeleteTable" => await Dispatch<DeleteTableRequest, DeleteTableResponse>(context.Request.Body, tableOps.DeleteTable),
-            "DescribeTable" => await Dispatch<DescribeTableRequest, DescribeTableResponse>(context.Request.Body, tableOps.DescribeTable),
-            "ListTables" => await Dispatch<ListTablesRequest, ListTablesResponse>(context.Request.Body, tableOps.ListTables),
-            "PutItem" => await Dispatch<PutItemRequest, PutItemResponse>(context.Request.Body, itemOps.PutItem),
-            "GetItem" => await Dispatch<GetItemRequest, GetItemResponse>(context.Request.Body, itemOps.GetItem),
-            "DeleteItem" => await Dispatch<DeleteItemRequest, DeleteItemResponse>(context.Request.Body, itemOps.DeleteItem),
-            "UpdateItem" => await Dispatch<UpdateItemRequest, UpdateItemResponse>(context.Request.Body, itemOps.UpdateItem),
-            "Query" => await Dispatch<QueryRequest, QueryResponse>(context.Request.Body, queryScanOps.Query),
-            "Scan" => await Dispatch<ScanRequest, ScanResponse>(context.Request.Body, queryScanOps.Scan),
-            "BatchGetItem" => await Dispatch<BatchGetItemRequest, BatchGetItemResponse>(context.Request.Body, batchOps.BatchGetItem),
-            "BatchWriteItem" => await Dispatch<BatchWriteItemRequest, BatchWriteItemResponse>(context.Request.Body, batchOps.BatchWriteItem),
-            "TransactWriteItems" => await Dispatch<TransactWriteItemsRequest, TransactWriteItemsResponse>(context.Request.Body, txOps.TransactWriteItems),
-            "TransactGetItems" => await Dispatch<TransactGetItemsRequest, TransactGetItemsResponse>(context.Request.Body, txOps.TransactGetItems),
+            "CreateTable" => await Dispatch<CreateTableRequest, CreateTableResponse>(body, tableOps.CreateTable),
+            "DeleteTable" => await Dispatch<DeleteTableRequest, DeleteTableResponse>(body, tableOps.DeleteTable),
+            "DescribeTable" => await Dispatch<DescribeTableRequest, DescribeTableResponse>(body, tableOps.DescribeTable),
+            "ListTables" => await Dispatch<ListTablesRequest, ListTablesResponse>(body, tableOps.ListTables),
+            "PutItem" => await Dispatch<PutItemRequest, PutItemResponse>(body, itemOps.PutItem),
+            "GetItem" => await Dispatch<GetItemRequest, GetItemResponse>(body, itemOps.GetItem),
+            "DeleteItem" => await Dispatch<DeleteItemRequest, DeleteItemResponse>(body, itemOps.DeleteItem),
+            "UpdateItem" => await Dispatch<UpdateItemRequest, UpdateItemResponse>(body, itemOps.UpdateItem),
+            "Query" => await Dispatch<QueryRequest, QueryResponse>(body, queryScanOps.Query),
+            "Scan" => await Dispatch<ScanRequest, ScanResponse>(body, queryScanOps.Scan),
+            "BatchGetItem" => await Dispatch<BatchGetItemRequest, BatchGetItemResponse>(body, batchOps.BatchGetItem),
+            "BatchWriteItem" => await Dispatch<BatchWriteItemRequest, BatchWriteItemResponse>(body, batchOps.BatchWriteItem),
+            "TransactWriteItems" => await Dispatch<TransactWriteItemsRequest, TransactWriteItemsResponse>(body, txOps.TransactWriteItems),
+            "TransactGetItems" => await Dispatch<TransactGetItemsRequest, TransactGetItemsResponse>(body, txOps.TransactGetItems),
             _ => throw new UnknownOperationException()
         };
 
@@ -204,13 +206,13 @@ public sealed class DynamoDbRequestRouter(
 ```
 
 **What was removed:**
-- Health check handling (`GET /` check and response) — now in `HealthCheckHandler`
+- Health check handling (`GET /` check and response) — now in `MapHealthChecks`
 - HTTP method/path validation — now in `DynamoDbValidationMiddleware`
-- `X-Amz-Target` header parsing and validation — now in `DynamoDbValidationMiddleware`
+- `X-Amz-Target` header validation (presence and prefix checks) — now in `DynamoDbValidationMiddleware`
 - `WriteError` method and all catch blocks — now in `DynamoDbErrorMiddleware`
-- `TargetPrefix` constant — moved to `DynamoDbValidationMiddleware`
 
 **What remains:**
+- `X-Amz-Target` header parsing (one line — safe because validation middleware already checked it)
 - Switch expression mapping operation names to typed handlers
 - `Dispatch<TReq, TRes>` for JSON deserialization/serialization
 - Writing the 200 response with correct content type

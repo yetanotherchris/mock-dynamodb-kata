@@ -17,7 +17,7 @@
 ## Phase 3: Extract Validation
 - [ ] Create `src/MockDynamoDB.Server/Middleware/DynamoDbValidationMiddleware.cs` with POST method check, path check, and `X-Amz-Target` header parsing
 - [ ] Add `app.UseMiddleware<DynamoDbValidationMiddleware>()` to `Program.cs` after error middleware
-- [ ] Update `DynamoDbRequestRouter.HandleRequest()` to read operation name from `context.Items["DynamoDb.Operation"]`
+- [ ] Update `DynamoDbRequestRouter.HandleRequest()` to read operation name from `X-Amz-Target` header directly (validation middleware guarantees it's valid)
 - [ ] Remove HTTP method/path validation from `DynamoDbRequestRouter`
 - [ ] Remove `X-Amz-Target` header parsing from `DynamoDbRequestRouter`
 - [ ] Remove `TargetPrefix` constant from `DynamoDbRequestRouter`
