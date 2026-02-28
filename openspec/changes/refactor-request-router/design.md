@@ -10,7 +10,7 @@ Before:
 
 After:
   HTTP Request
-    → MapHealthChecks "/" (short-circuits GET health check requests)
+    → MapHealthChecks "/" and "/healthz" (short-circuits GET health check requests)
     → DynamoDbErrorMiddleware (wraps downstream in try/catch, formats error responses)
     → DynamoDbValidationMiddleware (validates POST /, parses X-Amz-Target, short-circuits invalid requests)
     → DynamoDbRequestRouter (pure dispatch: switch → Dispatch<TReq, TRes> → write response)
@@ -20,21 +20,23 @@ Each middleware either short-circuits (returns a response directly) or calls `ne
 
 ## Health Check
 
-Uses ASP.NET Core's built-in health check framework (`Microsoft.Extensions.Diagnostics.HealthChecks`, included in the shared framework — no extra NuGet needed). Mapped to `GET /` with a custom response writer to match the existing JSON body.
+Uses ASP.NET Core's built-in health check framework (`Microsoft.Extensions.Diagnostics.HealthChecks`, included in the shared framework — no extra NuGet needed). Mapped to both `GET /` (backward compatibility) and `GET /healthz` (standard convention) with a custom response writer to match the existing JSON body.
 
 ```csharp
 // Program.cs — DI registration
 builder.Services.AddHealthChecks();
 
-// Program.cs — endpoint mapping
-app.MapHealthChecks("/", new HealthCheckOptions
+// Program.cs — endpoint mapping (shared options)
+var healthCheckOptions = new HealthCheckOptions
 {
     ResponseWriter = async (context, _) =>
     {
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync("""{"status":"ok","service":"mock-dynamodb"}""");
     }
-});
+};
+app.MapHealthChecks("/", healthCheckOptions);
+app.MapHealthChecks("/healthz", healthCheckOptions);
 ```
 
 This is extensible — custom `IHealthCheck` implementations can be added later (e.g., to report table count or memory usage) without changing the endpoint wiring.
@@ -240,14 +242,16 @@ builder.Services.AddSingleton<DynamoDbRequestRouter>();
 
 var app = builder.Build();
 
-app.MapHealthChecks("/", new HealthCheckOptions
+var healthCheckOptions = new HealthCheckOptions
 {
     ResponseWriter = async (context, _) =>
     {
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync("""{"status":"ok","service":"mock-dynamodb"}""");
     }
-});
+};
+app.MapHealthChecks("/", healthCheckOptions);
+app.MapHealthChecks("/healthz", healthCheckOptions);
 
 app.UseMiddleware<DynamoDbErrorMiddleware>();
 app.UseMiddleware<DynamoDbValidationMiddleware>();
@@ -261,7 +265,7 @@ public partial class Program { }
 ```
 
 **Middleware order matters:**
-1. `MapHealthChecks("/", ...)` — `GET /` handled first via endpoint routing, never hits DynamoDB middleware
+1. `MapHealthChecks("/", "/healthz")` — `GET` health checks handled first via endpoint routing, never hit DynamoDB middleware
 2. `DynamoDbErrorMiddleware` — outermost wrapper, catches all exceptions from downstream
 3. `DynamoDbValidationMiddleware` — validates request, stores operation name, calls next
 4. `MapPost("/", router.HandleRequest)` — terminal handler, dispatches operation
@@ -278,7 +282,7 @@ public partial class Program { }
 | File | Change |
 |------|--------|
 | `Middleware/DynamoDbRequestRouter.cs` | Remove health check, validation, error handling; read operation from `HttpContext.Items` |
-| `Program.cs` | Add `AddHealthChecks()`, `MapHealthChecks("/")`, wire `DynamoDbErrorMiddleware` and `DynamoDbValidationMiddleware` |
+| `Program.cs` | Add `AddHealthChecks()`, `MapHealthChecks("/")`, `MapHealthChecks("/healthz")`, wire `DynamoDbErrorMiddleware` and `DynamoDbValidationMiddleware` |
 
 ## Files Removed
 

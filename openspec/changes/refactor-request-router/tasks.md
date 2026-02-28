@@ -2,7 +2,7 @@
 
 ## Phase 1: Extract Health Check
 - [ ] Add `builder.Services.AddHealthChecks()` to `Program.cs`
-- [ ] Add `app.MapHealthChecks("/", ...)` with custom response writer to `Program.cs`
+- [ ] Add `app.MapHealthChecks("/", ...)` and `app.MapHealthChecks("/healthz", ...)` with shared custom response writer to `Program.cs`
 - [ ] Remove `GET /` handling from `DynamoDbRequestRouter.HandleRequest()`
 - [ ] Change `app.Map("/", ...)` to `app.MapPost("/", ...)` in `Program.cs`
 - [ ] Run tests — health check and all DynamoDB operations must pass
