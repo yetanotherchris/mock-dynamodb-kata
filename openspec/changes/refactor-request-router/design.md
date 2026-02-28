@@ -10,7 +10,7 @@ Before:
 
 After:
   HTTP Request
-    → MapGet "/" (short-circuits GET health check requests)
+    → MapHealthChecks "/" (short-circuits GET health check requests)
     → DynamoDbErrorMiddleware (wraps downstream in try/catch, formats error responses)
     → DynamoDbValidationMiddleware (validates POST /, parses X-Amz-Target, short-circuits invalid requests)
     → DynamoDbRequestRouter (pure dispatch: switch → Dispatch<TReq, TRes> → write response)
@@ -20,13 +20,24 @@ Each middleware either short-circuits (returns a response directly) or calls `ne
 
 ## Health Check
 
-The health check is a single `MapGet` call in `Program.cs` — no separate class needed:
+Uses ASP.NET Core's built-in health check framework (`Microsoft.Extensions.Diagnostics.HealthChecks`, included in the shared framework — no extra NuGet needed). Mapped to `GET /` with a custom response writer to match the existing JSON body.
 
 ```csharp
-app.MapGet("/", () => Results.Json(new { status = "ok", service = "mock-dynamodb" }));
+// Program.cs — DI registration
+builder.Services.AddHealthChecks();
+
+// Program.cs — endpoint mapping
+app.MapHealthChecks("/", new HealthCheckOptions
+{
+    ResponseWriter = async (context, _) =>
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("""{"status":"ok","service":"mock-dynamodb"}""");
+    }
+});
 ```
 
-**Why not `IHealthCheck`?** ASP.NET's built-in health check framework (`AddHealthChecks()` / `MapHealthChecks()`) uses `/healthz` by default and adds framework dependencies. The DynamoDB health check must respond at `GET /` with a specific JSON body to match the existing behavior.
+This is extensible — custom `IHealthCheck` implementations can be added later (e.g., to report table count or memory usage) without changing the endpoint wiring.
 
 ## New Classes
 
@@ -204,13 +215,15 @@ public sealed class DynamoDbRequestRouter(
 
 ### `Program.cs`
 
-The middleware pipeline is wired in order. Endpoint routing (`MapHealthCheck`, `MapPost`) runs first, then middleware applies to the DynamoDB POST endpoint.
+The middleware pipeline is wired in order. Endpoint routing (`MapHealthChecks`, `MapPost`) runs first, then middleware applies to the DynamoDB POST endpoint.
 
 ```csharp
 using MockDynamoDB.Server.Middleware;
 // ... existing usings
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddHealthChecks();
 
 // Existing DI registrations (unchanged)
 builder.Services.AddSingleton<ITableStore, InMemoryTableStore>();
@@ -227,7 +240,14 @@ builder.Services.AddSingleton<DynamoDbRequestRouter>();
 
 var app = builder.Build();
 
-app.MapGet("/", () => Results.Json(new { status = "ok", service = "mock-dynamodb" }));
+app.MapHealthChecks("/", new HealthCheckOptions
+{
+    ResponseWriter = async (context, _) =>
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("""{"status":"ok","service":"mock-dynamodb"}""");
+    }
+});
 
 app.UseMiddleware<DynamoDbErrorMiddleware>();
 app.UseMiddleware<DynamoDbValidationMiddleware>();
@@ -241,7 +261,7 @@ public partial class Program { }
 ```
 
 **Middleware order matters:**
-1. `MapGet("/", ...)` — `GET /` handled first via endpoint routing, never hits DynamoDB middleware
+1. `MapHealthChecks("/", ...)` — `GET /` handled first via endpoint routing, never hits DynamoDB middleware
 2. `DynamoDbErrorMiddleware` — outermost wrapper, catches all exceptions from downstream
 3. `DynamoDbValidationMiddleware` — validates request, stores operation name, calls next
 4. `MapPost("/", router.HandleRequest)` — terminal handler, dispatches operation
@@ -258,7 +278,7 @@ public partial class Program { }
 | File | Change |
 |------|--------|
 | `Middleware/DynamoDbRequestRouter.cs` | Remove health check, validation, error handling; read operation from `HttpContext.Items` |
-| `Program.cs` | Add `MapGet` health check, wire `DynamoDbErrorMiddleware` and `DynamoDbValidationMiddleware` |
+| `Program.cs` | Add `AddHealthChecks()`, `MapHealthChecks("/")`, wire `DynamoDbErrorMiddleware` and `DynamoDbValidationMiddleware` |
 
 ## Files Removed
 
