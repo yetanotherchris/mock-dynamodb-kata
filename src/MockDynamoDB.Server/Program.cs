@@ -44,6 +44,7 @@ app.MapHealthChecks("/", healthCheckOptions);
 app.MapHealthChecks("/healthz", healthCheckOptions);
 
 app.UseMiddleware<DynamoDbErrorMiddleware>();
+app.UseMiddleware<DynamoDbValidationMiddleware>();
 
 var router = app.Services.GetRequiredService<DynamoDbRequestRouter>();
 app.MapPost("/", async context => await router.HandleRequest(context));

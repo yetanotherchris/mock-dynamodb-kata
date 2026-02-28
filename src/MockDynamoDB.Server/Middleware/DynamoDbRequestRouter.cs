@@ -2,6 +2,7 @@ using System.Text.Json;
 using MockDynamoDB.Core.Models;
 using MockDynamoDB.Core.Operations;
 
+
 namespace MockDynamoDB.Server.Middleware;
 
 public sealed class DynamoDbRequestRouter(
@@ -16,22 +17,7 @@ public sealed class DynamoDbRequestRouter(
 
     public async Task HandleRequest(HttpContext context)
     {
-        if (context.Request.Method != "POST" || context.Request.Path != "/")
-        {
-            context.Response.StatusCode = 404;
-            return;
-        }
-
-        var target = context.Request.Headers["X-Amz-Target"].FirstOrDefault();
-        if (string.IsNullOrEmpty(target))
-            throw new DynamoDbException(
-                "com.amazonaws.dynamodb.v20120810#MissingAuthenticationTokenException",
-                "Missing Authentication Token");
-
-        if (!target.StartsWith(TargetPrefix))
-            throw new UnknownOperationException();
-
-        var operation = target[TargetPrefix.Length..];
+        var operation = context.Request.Headers["X-Amz-Target"].FirstOrDefault()![TargetPrefix.Length..];
 
         var result = operation switch
         {
