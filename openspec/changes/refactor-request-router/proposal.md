@@ -30,7 +30,7 @@ This uses idiomatic ASP.NET Core patterns (middleware pipeline, endpoint routing
 
 ## Scope
 
-- Extract health check from `DynamoDbRequestRouter` to a dedicated endpoint handler
+- Extract health check from `DynamoDbRequestRouter` to a `MapGet` call in `Program.cs`
 - Extract DynamoDB error formatting to an error-handling middleware
 - Extract HTTP/header validation to a validation middleware
 - Simplify `DynamoDbRequestRouter` to only dispatch operations and serialize/deserialize JSON

@@ -10,7 +10,7 @@ Before:
 
 After:
   HTTP Request
-    → HealthCheckHandler (MapGet "/", short-circuits GET requests)
+    → MapGet "/" (short-circuits GET health check requests)
     → DynamoDbErrorMiddleware (wraps downstream in try/catch, formats error responses)
     → DynamoDbValidationMiddleware (validates POST /, parses X-Amz-Target, short-circuits invalid requests)
     → DynamoDbRequestRouter (pure dispatch: switch → Dispatch<TReq, TRes> → write response)
@@ -18,29 +18,17 @@ After:
 
 Each middleware either short-circuits (returns a response directly) or calls `next()` to pass control downstream. This follows ASP.NET Core's standard middleware pattern.
 
-## New Classes
+## Health Check
 
-### `Handlers/HealthCheckHandler.cs`
-
-A static class with an extension method that registers a `GET /` endpoint using ASP.NET Core's minimal API.
+The health check is a single `MapGet` call in `Program.cs` — no separate class needed:
 
 ```csharp
-namespace MockDynamoDB.Server.Handlers;
-
-public static class HealthCheckHandler
-{
-    public static IEndpointRouteBuilder MapHealthCheck(this IEndpointRouteBuilder app)
-    {
-        app.MapGet("/", () => Results.Json(
-            new { status = "ok", service = "mock-dynamodb" }));
-        return app;
-    }
-}
+app.MapGet("/", () => Results.Json(new { status = "ok", service = "mock-dynamodb" }));
 ```
 
-**Why an extension method?** It follows the `MapGet`/`MapPost` convention used throughout ASP.NET minimal APIs. The health check is an endpoint, not middleware — it returns a response for a specific route, not a cross-cutting concern.
-
 **Why not `IHealthCheck`?** ASP.NET's built-in health check framework (`AddHealthChecks()` / `MapHealthChecks()`) uses `/healthz` by default and adds framework dependencies. The DynamoDB health check must respond at `GET /` with a specific JSON body to match the existing behavior.
+
+## New Classes
 
 ### `Middleware/DynamoDbErrorMiddleware.cs`
 
@@ -219,7 +207,6 @@ public sealed class DynamoDbRequestRouter(
 The middleware pipeline is wired in order. Endpoint routing (`MapHealthCheck`, `MapPost`) runs first, then middleware applies to the DynamoDB POST endpoint.
 
 ```csharp
-using MockDynamoDB.Server.Handlers;
 using MockDynamoDB.Server.Middleware;
 // ... existing usings
 
@@ -240,7 +227,7 @@ builder.Services.AddSingleton<DynamoDbRequestRouter>();
 
 var app = builder.Build();
 
-app.MapHealthCheck();
+app.MapGet("/", () => Results.Json(new { status = "ok", service = "mock-dynamodb" }));
 
 app.UseMiddleware<DynamoDbErrorMiddleware>();
 app.UseMiddleware<DynamoDbValidationMiddleware>();
@@ -254,7 +241,7 @@ public partial class Program { }
 ```
 
 **Middleware order matters:**
-1. `MapHealthCheck()` — `GET /` handled first via endpoint routing, never hits DynamoDB middleware
+1. `MapGet("/", ...)` — `GET /` handled first via endpoint routing, never hits DynamoDB middleware
 2. `DynamoDbErrorMiddleware` — outermost wrapper, catches all exceptions from downstream
 3. `DynamoDbValidationMiddleware` — validates request, stores operation name, calls next
 4. `MapPost("/", router.HandleRequest)` — terminal handler, dispatches operation
@@ -263,7 +250,6 @@ public partial class Program { }
 
 | File | Contents |
 |------|----------|
-| `Handlers/HealthCheckHandler.cs` | Static extension method mapping `GET /` health check endpoint |
 | `Middleware/DynamoDbErrorMiddleware.cs` | Error-handling middleware with `WriteError` and `TransactionCanceledException` support |
 | `Middleware/DynamoDbValidationMiddleware.cs` | Request validation middleware: POST method, path, X-Amz-Target header parsing |
 
@@ -272,7 +258,7 @@ public partial class Program { }
 | File | Change |
 |------|--------|
 | `Middleware/DynamoDbRequestRouter.cs` | Remove health check, validation, error handling; read operation from `HttpContext.Items` |
-| `Program.cs` | Add `MapHealthCheck()`, wire `DynamoDbErrorMiddleware` and `DynamoDbValidationMiddleware` |
+| `Program.cs` | Add `MapGet` health check, wire `DynamoDbErrorMiddleware` and `DynamoDbValidationMiddleware` |
 
 ## Files Removed
 

@@ -1,8 +1,7 @@
 # Tasks
 
 ## Phase 1: Extract Health Check
-- [ ] Create `src/MockDynamoDB.Server/Handlers/HealthCheckHandler.cs` with `MapHealthCheck` extension method
-- [ ] Add `app.MapHealthCheck()` to `Program.cs` before the catch-all route
+- [ ] Add `app.MapGet("/", ...)` health check endpoint to `Program.cs`
 - [ ] Remove `GET /` handling from `DynamoDbRequestRouter.HandleRequest()`
 - [ ] Change `app.Map("/", ...)` to `app.MapPost("/", ...)` in `Program.cs`
 - [ ] Run tests — health check and all DynamoDB operations must pass
