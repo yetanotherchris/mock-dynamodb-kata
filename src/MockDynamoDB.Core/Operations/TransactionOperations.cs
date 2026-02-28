@@ -7,11 +7,9 @@ namespace MockDynamoDB.Core.Operations;
 
 public sealed class TransactionOperations(ITableStore tableStore, IItemStore itemStore, ReaderWriterLockSlim rwLock)
 {
-    public JsonDocument TransactWriteItems(JsonDocument request)
+    public TransactWriteItemsResponse TransactWriteItems(TransactWriteItemsRequest request)
     {
-        var root = request.RootElement;
-        var transactItems = root.GetProperty("TransactItems");
-        var items = transactItems.EnumerateArray().ToList();
+        var items = request.TransactItems;
 
         if (items.Count > 100)
             throw new ValidationException("Member must have length less than or equal to 100");
@@ -44,9 +42,9 @@ public sealed class TransactionOperations(ITableStore tableStore, IItemStore ite
                 throw new Models.TransactionCanceledException(reasons);
 
             // Phase 2: Apply all writes
-            for (int i = 0; i < items.Count; i++)
+            foreach (var item in items)
             {
-                ApplyTransactWrite(items[i]);
+                ApplyTransactWrite(item);
             }
         }
         finally
@@ -54,14 +52,12 @@ public sealed class TransactionOperations(ITableStore tableStore, IItemStore ite
             rwLock.ExitWriteLock();
         }
 
-        return ItemOperations.BuildEmptyResponse();
+        return new TransactWriteItemsResponse();
     }
 
-    public JsonDocument TransactGetItems(JsonDocument request)
+    public TransactGetItemsResponse TransactGetItems(TransactGetItemsRequest request)
     {
-        var root = request.RootElement;
-        var transactItems = root.GetProperty("TransactItems");
-        var items = transactItems.EnumerateArray().ToList();
+        var items = request.TransactItems;
 
         if (items.Count > 100)
             throw new ValidationException("Member must have length less than or equal to 100");
@@ -69,28 +65,24 @@ public sealed class TransactionOperations(ITableStore tableStore, IItemStore ite
         rwLock.EnterReadLock();
         try
         {
-            var responses = new List<Dictionary<string, AttributeValue>?>();
+            var responses = new List<ItemResponse>();
 
             foreach (var item in items)
             {
-                var get = item.GetProperty("Get");
-                var tableName = get.GetProperty("TableName").GetString()!;
-                tableStore.GetTable(tableName);
-                var key = ItemOperations.DeserializeItem(get.GetProperty("Key"));
+                var get = item.Get;
+                tableStore.GetTable(get.TableName);
 
-                var result = itemStore.GetItem(tableName, key);
+                var result = itemStore.GetItem(get.TableName, get.Key);
 
-                if (result != null && get.TryGetProperty("ProjectionExpression", out var pe))
+                if (result != null && get.ProjectionExpression != null)
                 {
-                    var expressionAttributeNames = get.TryGetProperty("ExpressionAttributeNames", out var ean)
-                        ? ItemOperations.DeserializeStringMap(ean) : null;
-                    result = ItemOperations.ApplyProjection(result, pe.GetString()!, expressionAttributeNames);
+                    result = ItemOperations.ApplyProjection(result, get.ProjectionExpression, get.ExpressionAttributeNames);
                 }
 
-                responses.Add(result);
+                responses.Add(new ItemResponse { Item = result });
             }
 
-            return BuildTransactGetResponse(responses);
+            return new TransactGetItemsResponse { Responses = responses };
         }
         finally
         {
@@ -98,91 +90,83 @@ public sealed class TransactionOperations(ITableStore tableStore, IItemStore ite
         }
     }
 
-    private string GetTransactWriteItemKey(JsonElement item)
+    private string GetTransactWriteItemKey(TransactWriteItem item)
     {
-        JsonElement op;
-        string tableName;
-        string keyJson;
-
-        if (item.TryGetProperty("Put", out op))
+        if (item.Put is { } put)
         {
-            tableName = op.GetProperty("TableName").GetString()!;
-            var table = tableStore.GetTable(tableName);
-            var putItem = ItemOperations.DeserializeItem(op.GetProperty("Item"));
-            var key = ItemOperations.ExtractKey(putItem, table);
-            keyJson = JsonSerializer.Serialize(key, ItemOperations.JsonOptions);
+            var table = tableStore.GetTable(put.TableName);
+            var key = ItemOperations.ExtractKey(put.Item, table);
+            var keyJson = JsonSerializer.Serialize(key, ItemOperations.JsonOptions);
+            return $"{put.TableName}:{keyJson}";
         }
-        else if (item.TryGetProperty("Delete", out op))
+        if (item.Delete is { } del)
         {
-            tableName = op.GetProperty("TableName").GetString()!;
-            keyJson = op.GetProperty("Key").GetRawText();
+            var keyJson = JsonSerializer.Serialize(del.Key, ItemOperations.JsonOptions);
+            return $"{del.TableName}:{keyJson}";
         }
-        else if (item.TryGetProperty("Update", out op))
+        if (item.Update is { } upd)
         {
-            tableName = op.GetProperty("TableName").GetString()!;
-            keyJson = op.GetProperty("Key").GetRawText();
+            var keyJson = JsonSerializer.Serialize(upd.Key, ItemOperations.JsonOptions);
+            return $"{upd.TableName}:{keyJson}";
         }
-        else if (item.TryGetProperty("ConditionCheck", out op))
+        if (item.ConditionCheck is { } cc)
         {
-            tableName = op.GetProperty("TableName").GetString()!;
-            keyJson = op.GetProperty("Key").GetRawText();
-        }
-        else
-        {
-            throw new ValidationException("Invalid TransactWriteItem");
+            var keyJson = JsonSerializer.Serialize(cc.Key, ItemOperations.JsonOptions);
+            return $"{cc.TableName}:{keyJson}";
         }
 
-        return $"{tableName}:{keyJson}";
+        throw new ValidationException("Invalid TransactWriteItem");
     }
 
-    private CancellationReason EvaluateTransactWriteCondition(JsonElement item)
+    private CancellationReason EvaluateTransactWriteCondition(TransactWriteItem item)
     {
-        JsonElement op;
-
-        if (item.TryGetProperty("Put", out op))
-            return EvaluateCondition(op, isConditionCheck: false);
-        if (item.TryGetProperty("Delete", out op))
-            return EvaluateCondition(op, isConditionCheck: false);
-        if (item.TryGetProperty("Update", out op))
-            return EvaluateCondition(op, isConditionCheck: false);
-        if (item.TryGetProperty("ConditionCheck", out op))
-            return EvaluateCondition(op, isConditionCheck: true);
+        if (item.Put is { } put)
+            return EvaluateCondition(put.TableName, put.ConditionExpression, null, put.Item,
+                put.ExpressionAttributeNames, put.ExpressionAttributeValues);
+        if (item.Delete is { } del)
+            return EvaluateCondition(del.TableName, del.ConditionExpression, del.Key, null,
+                del.ExpressionAttributeNames, del.ExpressionAttributeValues);
+        if (item.Update is { } upd)
+            return EvaluateCondition(upd.TableName, upd.ConditionExpression, upd.Key, null,
+                upd.ExpressionAttributeNames, upd.ExpressionAttributeValues);
+        if (item.ConditionCheck is { } cc)
+            return EvaluateCondition(cc.TableName, cc.ConditionExpression, cc.Key, null,
+                cc.ExpressionAttributeNames, cc.ExpressionAttributeValues);
 
         return new CancellationReason { Code = "None" };
     }
 
-    private CancellationReason EvaluateCondition(JsonElement op, bool isConditionCheck)
+    private CancellationReason EvaluateCondition(
+        string tableName,
+        string? conditionExpression,
+        Dictionary<string, AttributeValue>? key,
+        Dictionary<string, AttributeValue>? putItem,
+        Dictionary<string, string>? expressionAttributeNames,
+        Dictionary<string, AttributeValue>? expressionAttributeValues)
     {
-        if (!op.TryGetProperty("ConditionExpression", out var ce))
+        if (conditionExpression == null)
             return new CancellationReason { Code = "None" };
 
-        var tableName = op.GetProperty("TableName").GetString()!;
         tableStore.GetTable(tableName);
 
-        Dictionary<string, AttributeValue> key;
-        if (op.TryGetProperty("Key", out var keyProp))
+        Dictionary<string, AttributeValue> resolvedKey;
+        if (key != null)
         {
-            key = ItemOperations.DeserializeItem(keyProp);
+            resolvedKey = key;
         }
-        else if (op.TryGetProperty("Item", out var itemProp))
+        else if (putItem != null)
         {
             var table = tableStore.GetTable(tableName);
-            var putItem = ItemOperations.DeserializeItem(itemProp);
-            key = ItemOperations.ExtractKey(putItem, table);
+            resolvedKey = ItemOperations.ExtractKey(putItem, table);
         }
         else
         {
             return new CancellationReason { Code = "None" };
         }
 
-        var existingItem = itemStore.GetItem(tableName, key);
+        var existingItem = itemStore.GetItem(tableName, resolvedKey);
 
-        var expressionAttributeNames = op.TryGetProperty("ExpressionAttributeNames", out var ean)
-            ? ItemOperations.DeserializeStringMap(ean) : null;
-        var expressionAttributeValues = op.TryGetProperty("ExpressionAttributeValues", out var eav)
-            ? ItemOperations.DeserializeItem(eav) : null;
-
-        var ast = DynamoDbExpressionParser.ParseCondition(ce.GetString()!, expressionAttributeNames);
+        var ast = DynamoDbExpressionParser.ParseCondition(conditionExpression, expressionAttributeNames);
         var evaluator = new ConditionEvaluator(expressionAttributeValues);
 
         var itemToCheck = existingItem ?? new Dictionary<string, AttributeValue>();
@@ -198,73 +182,37 @@ public sealed class TransactionOperations(ITableStore tableStore, IItemStore ite
         return new CancellationReason { Code = "None" };
     }
 
-    private void ApplyTransactWrite(JsonElement item)
+    private void ApplyTransactWrite(TransactWriteItem item)
     {
-        if (item.TryGetProperty("Put", out var put))
+        if (item.Put is { } put)
         {
-            var tableName = put.GetProperty("TableName").GetString()!;
-            var putItem = ItemOperations.DeserializeItem(put.GetProperty("Item"));
-            itemStore.PutItem(tableName, putItem);
+            itemStore.PutItem(put.TableName, put.Item);
         }
-        else if (item.TryGetProperty("Delete", out var del))
+        else if (item.Delete is { } del)
         {
-            var tableName = del.GetProperty("TableName").GetString()!;
-            var key = ItemOperations.DeserializeItem(del.GetProperty("Key"));
-            itemStore.DeleteItem(tableName, key);
+            itemStore.DeleteItem(del.TableName, del.Key);
         }
-        else if (item.TryGetProperty("Update", out var upd))
+        else if (item.Update is { } upd)
         {
-            var tableName = upd.GetProperty("TableName").GetString()!;
-            var table = tableStore.GetTable(tableName);
-            var key = ItemOperations.DeserializeItem(upd.GetProperty("Key"));
+            var table = tableStore.GetTable(upd.TableName);
 
-            var existingItem = itemStore.GetItem(tableName, key);
+            var existingItem = itemStore.GetItem(upd.TableName, upd.Key);
             var updateItem = existingItem ?? new Dictionary<string, AttributeValue>();
             if (existingItem == null)
             {
-                foreach (var kv in key)
+                foreach (var kv in upd.Key)
                     updateItem[kv.Key] = kv.Value.DeepClone();
             }
 
-            if (upd.TryGetProperty("UpdateExpression", out var ue))
+            if (upd.UpdateExpression != null)
             {
-                var expressionAttributeNames = upd.TryGetProperty("ExpressionAttributeNames", out var ean)
-                    ? ItemOperations.DeserializeStringMap(ean) : null;
-                var expressionAttributeValues = upd.TryGetProperty("ExpressionAttributeValues", out var eav)
-                    ? ItemOperations.DeserializeItem(eav) : null;
-
-                var actions = DynamoDbExpressionParser.ParseUpdate(ue.GetString()!, expressionAttributeNames);
-                var evaluator = new UpdateEvaluator(expressionAttributeValues);
+                var actions = DynamoDbExpressionParser.ParseUpdate(upd.UpdateExpression, upd.ExpressionAttributeNames);
+                var evaluator = new UpdateEvaluator(upd.ExpressionAttributeValues);
                 evaluator.Apply(actions, updateItem);
             }
 
-            itemStore.PutItem(tableName, updateItem);
+            itemStore.PutItem(upd.TableName, updateItem);
         }
         // ConditionCheck has no write side-effect
-    }
-
-    private static JsonDocument BuildTransactGetResponse(List<Dictionary<string, AttributeValue>?> responses)
-    {
-        using var stream = new MemoryStream();
-        using var writer = new Utf8JsonWriter(stream);
-        writer.WriteStartObject();
-
-        writer.WritePropertyName("Responses");
-        writer.WriteStartArray();
-        foreach (var item in responses)
-        {
-            writer.WriteStartObject();
-            if (item != null)
-            {
-                writer.WritePropertyName("Item");
-                ItemOperations.WriteItem(writer, item);
-            }
-            writer.WriteEndObject();
-        }
-        writer.WriteEndArray();
-
-        writer.WriteEndObject();
-        writer.Flush();
-        return JsonDocument.Parse(stream.ToArray());
     }
 }

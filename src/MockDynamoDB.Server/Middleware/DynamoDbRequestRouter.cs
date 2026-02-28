@@ -12,6 +12,7 @@ public sealed class DynamoDbRequestRouter(
     TransactionOperations txOps)
 {
     private const string TargetPrefix = "DynamoDB_20120810.";
+    private static readonly JsonSerializerOptions JsonOptions = DynamoDbJsonOptions.Options;
 
     public async Task HandleRequest(HttpContext context)
     {
@@ -48,19 +49,28 @@ public sealed class DynamoDbRequestRouter(
 
         try
         {
-            using var body = await JsonDocument.ParseAsync(context.Request.Body);
-            var result = DispatchOperation(operation, body);
+            var result = operation switch
+            {
+                "CreateTable" => await Dispatch<CreateTableRequest, CreateTableResponse>(context.Request.Body, tableOps.CreateTable),
+                "DeleteTable" => await Dispatch<DeleteTableRequest, DeleteTableResponse>(context.Request.Body, tableOps.DeleteTable),
+                "DescribeTable" => await Dispatch<DescribeTableRequest, DescribeTableResponse>(context.Request.Body, tableOps.DescribeTable),
+                "ListTables" => await Dispatch<ListTablesRequest, ListTablesResponse>(context.Request.Body, tableOps.ListTables),
+                "PutItem" => await Dispatch<PutItemRequest, PutItemResponse>(context.Request.Body, itemOps.PutItem),
+                "GetItem" => await Dispatch<GetItemRequest, GetItemResponse>(context.Request.Body, itemOps.GetItem),
+                "DeleteItem" => await Dispatch<DeleteItemRequest, DeleteItemResponse>(context.Request.Body, itemOps.DeleteItem),
+                "UpdateItem" => await Dispatch<UpdateItemRequest, UpdateItemResponse>(context.Request.Body, itemOps.UpdateItem),
+                "Query" => await Dispatch<QueryRequest, QueryResponse>(context.Request.Body, queryScanOps.Query),
+                "Scan" => await Dispatch<ScanRequest, ScanResponse>(context.Request.Body, queryScanOps.Scan),
+                "BatchGetItem" => await Dispatch<BatchGetItemRequest, BatchGetItemResponse>(context.Request.Body, batchOps.BatchGetItem),
+                "BatchWriteItem" => await Dispatch<BatchWriteItemRequest, BatchWriteItemResponse>(context.Request.Body, batchOps.BatchWriteItem),
+                "TransactWriteItems" => await Dispatch<TransactWriteItemsRequest, TransactWriteItemsResponse>(context.Request.Body, txOps.TransactWriteItems),
+                "TransactGetItems" => await Dispatch<TransactGetItemsRequest, TransactGetItemsResponse>(context.Request.Body, txOps.TransactGetItems),
+                _ => throw new UnknownOperationException()
+            };
 
             context.Response.ContentType = "application/x-amz-json-1.0";
             context.Response.StatusCode = 200;
-
-            using var stream = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(stream))
-            {
-                result.RootElement.WriteTo(writer);
-            }
-            await context.Response.Body.WriteAsync(stream.ToArray());
-            result.Dispose();
+            await context.Response.Body.WriteAsync(result);
         }
         catch (DynamoDbException ex)
         {
@@ -74,26 +84,11 @@ public sealed class DynamoDbRequestRouter(
         }
     }
 
-    private JsonDocument DispatchOperation(string operation, JsonDocument body)
+    private static async Task<byte[]> Dispatch<TReq, TRes>(Stream body, Func<TReq, TRes> handler)
     {
-        return operation switch
-        {
-            "CreateTable" => tableOps.CreateTable(body),
-            "DeleteTable" => tableOps.DeleteTable(body),
-            "DescribeTable" => tableOps.DescribeTable(body),
-            "ListTables" => tableOps.ListTables(body),
-            "PutItem" => itemOps.PutItem(body),
-            "GetItem" => itemOps.GetItem(body),
-            "DeleteItem" => itemOps.DeleteItem(body),
-            "UpdateItem" => itemOps.UpdateItem(body),
-            "Query" => queryScanOps.Query(body),
-            "Scan" => queryScanOps.Scan(body),
-            "BatchGetItem" => batchOps.BatchGetItem(body),
-            "BatchWriteItem" => batchOps.BatchWriteItem(body),
-            "TransactWriteItems" => txOps.TransactWriteItems(body),
-            "TransactGetItems" => txOps.TransactGetItems(body),
-            _ => throw new UnknownOperationException()
-        };
+        var request = await JsonSerializer.DeserializeAsync<TReq>(body, JsonOptions);
+        var response = handler(request!);
+        return JsonSerializer.SerializeToUtf8Bytes(response, JsonOptions);
     }
 
     private static async Task WriteError(HttpContext context, int statusCode, string errorType, string message, DynamoDbException? ex = null)
