@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using MockDynamoDB.Server.IoC;
 using MockDynamoDB.Server.Middleware;
@@ -31,7 +32,7 @@ var healthCheckOptions = new HealthCheckOptions
     ResponseWriter = async (context, _) =>
     {
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync("""{"status":"ok","service":"mock-dynamodb"}""");
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { status = "ok", service = "mock-dynamodb" }));
     }
 };
 app.MapHealthChecks("/", healthCheckOptions);
