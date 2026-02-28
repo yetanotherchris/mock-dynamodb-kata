@@ -1,38 +1,15 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using MockDynamoDB.Core.Operations;
-using MockDynamoDB.Core.Storage;
-using MockDynamoDB.Server.Commands;
+using MockDynamoDB.Server.IoC;
 using MockDynamoDB.Server.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHealthChecks();
 
-builder.Services.AddSingleton<ITableStore, InMemoryTableStore>();
-builder.Services.AddSingleton<IItemStore, InMemoryItemStore>();
-builder.Services.AddSingleton<ReaderWriterLockSlim>();
-builder.Services.AddSingleton<TableOperations>();
-builder.Services.AddSingleton<ItemOperations>();
-builder.Services.AddSingleton<QueryScanOperations>();
-builder.Services.AddSingleton<BatchOperations>();
-builder.Services.AddSingleton<TransactionOperations>();
-
-builder.Services.AddSingleton<IDynamoDbCommand, CreateTableCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, DeleteTableCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, DescribeTableCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, ListTablesCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, PutItemCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, GetItemCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, DeleteItemCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, UpdateItemCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, QueryCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, ScanCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, BatchGetItemCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, BatchWriteItemCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, TransactWriteItemsCommand>();
-builder.Services.AddSingleton<IDynamoDbCommand, TransactGetItemsCommand>();
-
-builder.Services.AddSingleton<DynamoDbRequestRouter>();
+builder.Services
+    .AddDynamoDbStores()
+    .AddDynamoDbOperations()
+    .AddDynamoDbCommands();
 
 var portStr = Environment.GetEnvironmentVariable("MOCK_DYNAMODB_PORT");
 var port = 8000;
