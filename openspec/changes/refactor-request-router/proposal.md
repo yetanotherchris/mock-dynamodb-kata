@@ -43,8 +43,26 @@ Each command class has one reason to change. The router has zero knowledge of sp
 ## Out of Scope
 
 - Changing the operation classes (`TableOperations`, `ItemOperations`, etc.) — they are not affected
-- Replacing the switch-based dispatch with a handler registry or dictionary lookup — the switch expression is appropriate for this RPC-style protocol and 14 operations
 - Adding MVC controllers — DynamoDB routes all operations to `POST /` via header, which doesn't map to controller-based URL routing
 - Adding new DynamoDB operations
 - Changing error types, status codes, or error response format
 - Changing JSON serialization options or `AttributeValueConverter`
+
+## Design Feedback
+
+The following changes were made to the initial proposal following review by Chris:
+
+**Health check: drop the `HealthCheckHandler` class**
+The initial draft proposed a `HealthCheckHandler` static class with a `MapHealthCheck` extension method. Chris pointed out this is a one-liner and doesn't warrant a separate class — it should live directly in `Program.cs`. Accepted: health check is now a `MapHealthChecks` call inline in `Program.cs`.
+
+**Health check: use the built-in ASP.NET Core framework**
+Chris noted that ASP.NET Core has built-in health check extension methods (`AddHealthChecks()` / `MapHealthChecks()`). The initial draft used a raw `MapGet`. Accepted: switched to `builder.Services.AddHealthChecks()` + `app.MapHealthChecks()` with a custom `ResponseWriter`, which is more extensible and idiomatic.
+
+**Health check: add `/healthz`**
+Chris requested the health check also respond at the standard `/healthz` path, in addition to `/`. Accepted: both paths are mapped with a shared `HealthCheckOptions` instance.
+
+**`HttpContext.Items` for operation name: remove it**
+The initial design stored the parsed operation name in `context.Items["DynamoDb.Operation"]` in the validation middleware and read it back in the router. Chris flagged this as unpleasant (a stringly-typed dictionary lookup with a cast). Accepted: the router reads `X-Amz-Target` directly — the validation middleware has already guaranteed it is valid, so re-parsing is safe and clearer.
+
+**Command pattern instead of `Dispatch<TReq, TRes>`**
+The initial design retained a generic `Dispatch<TReq, TRes>(Stream body, Func<TReq, TRes> handler)` method inside the router, with a 14-arm switch expression passing operation methods as `Func` delegates. Chris observed this was an unnecessarily dynamic/functional style for C# — each operation should be a proper typed class. Accepted: replaced with an `IDynamoDbCommand` interface, a `DynamoDbCommand<TRequest, TResponse>` abstract base class handling serialization, and 14 concrete command classes. The router becomes a dictionary dispatcher with no knowledge of specific operations.
