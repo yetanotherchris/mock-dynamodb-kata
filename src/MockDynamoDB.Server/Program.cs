@@ -1,18 +1,16 @@
-using MockDynamoDB.Core.Operations;
-using MockDynamoDB.Core.Storage;
+using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using MockDynamoDB.Server.IoC;
 using MockDynamoDB.Server.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddSingleton<ITableStore, InMemoryTableStore>();
-builder.Services.AddSingleton<IItemStore, InMemoryItemStore>();
-builder.Services.AddSingleton<ReaderWriterLockSlim>();
-builder.Services.AddSingleton<TableOperations>();
-builder.Services.AddSingleton<ItemOperations>();
-builder.Services.AddSingleton<QueryScanOperations>();
-builder.Services.AddSingleton<BatchOperations>();
-builder.Services.AddSingleton<TransactionOperations>();
-builder.Services.AddSingleton<DynamoDbRequestRouter>();
+builder.Services.AddHealthChecks();
+
+builder.Services
+    .AddDynamoDbStores()
+    .AddDynamoDbOperations()
+    .AddDynamoDbCommands();
 
 var portStr = Environment.GetEnvironmentVariable("MOCK_DYNAMODB_PORT");
 var port = 8000;
@@ -29,8 +27,22 @@ builder.WebHost.UseUrls($"http://*:{port}");
 
 var app = builder.Build();
 
+var healthCheckOptions = new HealthCheckOptions
+{
+    ResponseWriter = async (context, _) =>
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { status = "ok", service = "mock-dynamodb" }));
+    }
+};
+app.MapHealthChecks("/", healthCheckOptions);
+app.MapHealthChecks("/healthz", healthCheckOptions);
+
+app.UseMiddleware<DynamoDbErrorMiddleware>();
+app.UseMiddleware<DynamoDbValidationMiddleware>();
+
 var router = app.Services.GetRequiredService<DynamoDbRequestRouter>();
-app.Map("/", async context => await router.HandleRequest(context));
+app.MapPost("/", async context => await router.HandleRequest(context));
 
 app.Run();
 
