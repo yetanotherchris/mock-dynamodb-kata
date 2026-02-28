@@ -13,7 +13,8 @@ After:
     → MapHealthChecks "/" and "/healthz" (short-circuits GET health check requests)
     → DynamoDbErrorMiddleware (wraps downstream in try/catch, formats error responses)
     → DynamoDbValidationMiddleware (validates POST /, parses X-Amz-Target, short-circuits invalid requests)
-    → DynamoDbRequestRouter (pure dispatch: switch → Dispatch<TReq, TRes> → write response)
+    → DynamoDbRequestRouter (dictionary lookup → IDynamoDbCommand.HandleAsync → write response)
+       └─ DynamoDbCommand<TRequest, TResponse> (deserialize → Execute → serialize)
 ```
 
 Each middleware either short-circuits (returns a response directly) or calls `next()` to pass control downstream. This follows ASP.NET Core's standard middleware pattern.
@@ -148,88 +149,130 @@ public sealed class DynamoDbValidationMiddleware(RequestDelegate next)
 
 **404 for non-POST requests:** The 404 response for wrong method/path is not a DynamoDB error — it's an HTTP-level concern. Writing the status code directly (without throwing) is correct because `DynamoDbErrorMiddleware` should only handle DynamoDB-specific errors.
 
+## Command Pattern
+
+Each DynamoDB operation is represented by a typed command class. A non-generic `IDynamoDbCommand` interface allows the router to hold a heterogeneous collection of commands. An abstract generic base class `DynamoDbCommand<TRequest, TResponse>` handles JSON deserialization and serialization, so concrete commands contain only their own logic.
+
+### `Commands/IDynamoDbCommand.cs`
+
+```csharp
+namespace MockDynamoDB.Server.Commands;
+
+public interface IDynamoDbCommand
+{
+    string OperationName { get; }
+    Task<byte[]> HandleAsync(Stream body, JsonSerializerOptions options);
+}
+
+public abstract class DynamoDbCommand<TRequest, TResponse> : IDynamoDbCommand
+{
+    public abstract string OperationName { get; }
+
+    public async Task<byte[]> HandleAsync(Stream body, JsonSerializerOptions options)
+    {
+        var request = await JsonSerializer.DeserializeAsync<TRequest>(body, options);
+        var response = Execute(request!);
+        return JsonSerializer.SerializeToUtf8Bytes(response, options);
+    }
+
+    protected abstract TResponse Execute(TRequest request);
+}
+```
+
+### `Commands/TableCommands.cs`
+
+Commands are grouped by operation class to match the existing code organisation:
+
+```csharp
+namespace MockDynamoDB.Server.Commands;
+
+public sealed class CreateTableCommand(TableOperations ops) : DynamoDbCommand<CreateTableRequest, CreateTableResponse>
+{
+    public override string OperationName => "CreateTable";
+    protected override CreateTableResponse Execute(CreateTableRequest request) => ops.CreateTable(request);
+}
+
+public sealed class DeleteTableCommand(TableOperations ops) : DynamoDbCommand<DeleteTableRequest, DeleteTableResponse>
+{
+    public override string OperationName => "DeleteTable";
+    protected override DeleteTableResponse Execute(DeleteTableRequest request) => ops.DeleteTable(request);
+}
+
+public sealed class DescribeTableCommand(TableOperations ops) : DynamoDbCommand<DescribeTableRequest, DescribeTableResponse>
+{
+    public override string OperationName => "DescribeTable";
+    protected override DescribeTableResponse Execute(DescribeTableRequest request) => ops.DescribeTable(request);
+}
+
+public sealed class ListTablesCommand(TableOperations ops) : DynamoDbCommand<ListTablesRequest, ListTablesResponse>
+{
+    public override string OperationName => "ListTables";
+    protected override ListTablesResponse Execute(ListTablesRequest request) => ops.ListTables(request);
+}
+```
+
+Similarly for **`ItemCommands.cs`** (PutItem, GetItem, DeleteItem, UpdateItem), **`QueryScanCommands.cs`** (Query, Scan), **`BatchCommands.cs`** (BatchGetItem, BatchWriteItem), and **`TransactionCommands.cs`** (TransactWriteItems, TransactGetItems).
+
 ## Changed Classes
 
 ### `Middleware/DynamoDbRequestRouter.cs`
 
-The router is stripped to its single remaining responsibility: dispatch an operation name to the correct typed handler. It reads the `X-Amz-Target` header directly — the validation middleware has already ensured it's present and correctly prefixed, so parsing here is safe.
+The router becomes a generic dictionary dispatcher with no knowledge of specific operations. New commands are registered in DI without touching this class.
 
 ```csharp
 namespace MockDynamoDB.Server.Middleware;
 
-public sealed class DynamoDbRequestRouter(
-    TableOperations tableOps,
-    ItemOperations itemOps,
-    QueryScanOperations queryScanOps,
-    BatchOperations batchOps,
-    TransactionOperations txOps)
+public sealed class DynamoDbRequestRouter
 {
     private const string TargetPrefix = "DynamoDB_20120810.";
     private static readonly JsonSerializerOptions JsonOptions = DynamoDbJsonOptions.Options;
+    private readonly Dictionary<string, IDynamoDbCommand> _commands;
+
+    public DynamoDbRequestRouter(IEnumerable<IDynamoDbCommand> commands)
+    {
+        _commands = commands.ToDictionary(c => c.OperationName);
+    }
 
     public async Task HandleRequest(HttpContext context)
     {
-        var body = context.Request.Body;
         var operation = context.Request.Headers["X-Amz-Target"].FirstOrDefault()![TargetPrefix.Length..];
 
-        var result = operation switch
-        {
-            "CreateTable" => await Dispatch<CreateTableRequest, CreateTableResponse>(body, tableOps.CreateTable),
-            "DeleteTable" => await Dispatch<DeleteTableRequest, DeleteTableResponse>(body, tableOps.DeleteTable),
-            "DescribeTable" => await Dispatch<DescribeTableRequest, DescribeTableResponse>(body, tableOps.DescribeTable),
-            "ListTables" => await Dispatch<ListTablesRequest, ListTablesResponse>(body, tableOps.ListTables),
-            "PutItem" => await Dispatch<PutItemRequest, PutItemResponse>(body, itemOps.PutItem),
-            "GetItem" => await Dispatch<GetItemRequest, GetItemResponse>(body, itemOps.GetItem),
-            "DeleteItem" => await Dispatch<DeleteItemRequest, DeleteItemResponse>(body, itemOps.DeleteItem),
-            "UpdateItem" => await Dispatch<UpdateItemRequest, UpdateItemResponse>(body, itemOps.UpdateItem),
-            "Query" => await Dispatch<QueryRequest, QueryResponse>(body, queryScanOps.Query),
-            "Scan" => await Dispatch<ScanRequest, ScanResponse>(body, queryScanOps.Scan),
-            "BatchGetItem" => await Dispatch<BatchGetItemRequest, BatchGetItemResponse>(body, batchOps.BatchGetItem),
-            "BatchWriteItem" => await Dispatch<BatchWriteItemRequest, BatchWriteItemResponse>(body, batchOps.BatchWriteItem),
-            "TransactWriteItems" => await Dispatch<TransactWriteItemsRequest, TransactWriteItemsResponse>(body, txOps.TransactWriteItems),
-            "TransactGetItems" => await Dispatch<TransactGetItemsRequest, TransactGetItemsResponse>(body, txOps.TransactGetItems),
-            _ => throw new UnknownOperationException()
-        };
+        if (!_commands.TryGetValue(operation, out var command))
+            throw new UnknownOperationException();
 
+        var result = await command.HandleAsync(context.Request.Body, JsonOptions);
         context.Response.ContentType = "application/x-amz-json-1.0";
         context.Response.StatusCode = 200;
         await context.Response.Body.WriteAsync(result);
-    }
-
-    private static async Task<byte[]> Dispatch<TReq, TRes>(Stream body, Func<TReq, TRes> handler)
-    {
-        var request = await JsonSerializer.DeserializeAsync<TReq>(body, JsonOptions);
-        var response = handler(request!);
-        return JsonSerializer.SerializeToUtf8Bytes(response, JsonOptions);
     }
 }
 ```
 
 **What was removed:**
-- Health check handling (`GET /` check and response) — now in `MapHealthChecks`
+- Health check handling — now in `MapHealthChecks`
 - HTTP method/path validation — now in `DynamoDbValidationMiddleware`
-- `X-Amz-Target` header validation (presence and prefix checks) — now in `DynamoDbValidationMiddleware`
-- `WriteError` method and all catch blocks — now in `DynamoDbErrorMiddleware`
+- `X-Amz-Target` validation (presence and prefix) — now in `DynamoDbValidationMiddleware`
+- `WriteError` and catch blocks — now in `DynamoDbErrorMiddleware`
+- The 14-arm switch expression and `Dispatch<TReq, TRes>` — now in individual command classes
+- The 5 operation class constructor parameters
 
 **What remains:**
 - `X-Amz-Target` header parsing (one line — safe because validation middleware already checked it)
-- Switch expression mapping operation names to typed handlers
-- `Dispatch<TReq, TRes>` for JSON deserialization/serialization
-- Writing the 200 response with correct content type
+- Dictionary lookup and dispatch to the matched command
+- Writing the 200 response
 
 ### `Program.cs`
 
-The middleware pipeline is wired in order. Endpoint routing (`MapHealthChecks`, `MapPost`) runs first, then middleware applies to the DynamoDB POST endpoint.
+Commands are registered as `IDynamoDbCommand` so the router receives them all via `IEnumerable<IDynamoDbCommand>`:
 
 ```csharp
+using MockDynamoDB.Server.Commands;
 using MockDynamoDB.Server.Middleware;
-// ... existing usings
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHealthChecks();
 
-// Existing DI registrations (unchanged)
 builder.Services.AddSingleton<ITableStore, InMemoryTableStore>();
 builder.Services.AddSingleton<IItemStore, InMemoryItemStore>();
 builder.Services.AddSingleton<ReaderWriterLockSlim>();
@@ -238,6 +281,23 @@ builder.Services.AddSingleton<ItemOperations>();
 builder.Services.AddSingleton<QueryScanOperations>();
 builder.Services.AddSingleton<BatchOperations>();
 builder.Services.AddSingleton<TransactionOperations>();
+
+// Commands registered against IDynamoDbCommand for collection injection
+builder.Services.AddSingleton<IDynamoDbCommand, CreateTableCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, DeleteTableCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, DescribeTableCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, ListTablesCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, PutItemCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, GetItemCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, DeleteItemCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, UpdateItemCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, QueryCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, ScanCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, BatchGetItemCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, BatchWriteItemCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, TransactWriteItemsCommand>();
+builder.Services.AddSingleton<IDynamoDbCommand, TransactGetItemsCommand>();
+
 builder.Services.AddSingleton<DynamoDbRequestRouter>();
 
 // ... existing port configuration (unchanged)
@@ -267,10 +327,10 @@ public partial class Program { }
 ```
 
 **Middleware order matters:**
-1. `MapHealthChecks("/", "/healthz")` — `GET` health checks handled first via endpoint routing, never hit DynamoDB middleware
+1. `MapHealthChecks("/", "/healthz")` — `GET` health checks handled first, never hit DynamoDB middleware
 2. `DynamoDbErrorMiddleware` — outermost wrapper, catches all exceptions from downstream
-3. `DynamoDbValidationMiddleware` — validates request, stores operation name, calls next
-4. `MapPost("/", router.HandleRequest)` — terminal handler, dispatches operation
+3. `DynamoDbValidationMiddleware` — validates request, calls next
+4. `MapPost("/", router.HandleRequest)` — terminal handler, dispatches to command
 
 ## Files Added
 
@@ -278,13 +338,19 @@ public partial class Program { }
 |------|----------|
 | `Middleware/DynamoDbErrorMiddleware.cs` | Error-handling middleware with `WriteError` and `TransactionCanceledException` support |
 | `Middleware/DynamoDbValidationMiddleware.cs` | Request validation middleware: POST method, path, X-Amz-Target header parsing |
+| `Commands/IDynamoDbCommand.cs` | `IDynamoDbCommand` interface + `DynamoDbCommand<TRequest, TResponse>` abstract base class |
+| `Commands/TableCommands.cs` | `CreateTableCommand`, `DeleteTableCommand`, `DescribeTableCommand`, `ListTablesCommand` |
+| `Commands/ItemCommands.cs` | `PutItemCommand`, `GetItemCommand`, `DeleteItemCommand`, `UpdateItemCommand` |
+| `Commands/QueryScanCommands.cs` | `QueryCommand`, `ScanCommand` |
+| `Commands/BatchCommands.cs` | `BatchGetItemCommand`, `BatchWriteItemCommand` |
+| `Commands/TransactionCommands.cs` | `TransactWriteItemsCommand`, `TransactGetItemsCommand` |
 
 ## Files Modified
 
 | File | Change |
 |------|--------|
-| `Middleware/DynamoDbRequestRouter.cs` | Remove health check, validation, error handling; read operation from `HttpContext.Items` |
-| `Program.cs` | Add `AddHealthChecks()`, `MapHealthChecks("/")`, `MapHealthChecks("/healthz")`, wire `DynamoDbErrorMiddleware` and `DynamoDbValidationMiddleware` |
+| `Middleware/DynamoDbRequestRouter.cs` | Replace 5-parameter constructor + switch + `Dispatch<TReq,TRes>` with `IEnumerable<IDynamoDbCommand>` dictionary dispatch |
+| `Program.cs` | Add health check services, register 14 commands as `IDynamoDbCommand`, wire middleware pipeline |
 
 ## Files Removed
 
@@ -294,7 +360,10 @@ None.
 
 The refactoring is done incrementally, one extraction at a time, with tests passing after each step:
 
-1. Extract health check to `HealthCheckHandler`, update `Program.cs` routing — tests pass
+1. Extract health check to `MapHealthChecks` in `Program.cs` — tests pass
 2. Extract error formatting to `DynamoDbErrorMiddleware`, remove catch blocks and `WriteError` from router — tests pass
 3. Extract validation to `DynamoDbValidationMiddleware`, remove header parsing from router — tests pass
-4. Final cleanup: remove dead code, verify router is minimal — full test suite passes
+4. Introduce `IDynamoDbCommand` interface and abstract base class
+5. Create command classes one group at a time (Table → Item → QueryScan → Batch → Transaction), replacing switch arms as each group is complete — tests pass after each group
+6. Replace router constructor and switch with dictionary lookup — tests pass
+7. Final cleanup: verify router has no operation-specific knowledge, run full test suite

@@ -21,20 +21,23 @@ The constructor already takes 5 operation class dependencies — adding any new 
 
 Decompose `DynamoDbRequestRouter` into focused classes using ASP.NET Core's middleware pipeline and minimal API endpoints:
 
-- **Health check** → Standalone minimal API endpoint (`MapGet`)
+- **Health check** → `MapHealthChecks` in `Program.cs`
 - **Error formatting** → Middleware that wraps downstream handlers in try/catch
 - **HTTP validation** → Middleware that validates method, path, and headers before dispatch
-- **Operation dispatch + serialization** → Remaining router, now focused on its single job
+- **Operation dispatch** → Router does a dictionary lookup against `IDynamoDbCommand` implementations
+- **Serialization + execution** → Each operation is a typed `DynamoDbCommand<TRequest, TResponse>` that handles its own deserialization, execution, and serialization
 
-This uses idiomatic ASP.NET Core patterns (middleware pipeline, endpoint routing) rather than custom abstractions. Each class has one reason to change.
+Each command class has one reason to change. The router has zero knowledge of specific operations.
 
 ## Scope
 
-- Extract health check from `DynamoDbRequestRouter` to a `MapGet` call in `Program.cs`
+- Extract health check from `DynamoDbRequestRouter` to a `MapHealthChecks` call in `Program.cs`
 - Extract DynamoDB error formatting to an error-handling middleware
 - Extract HTTP/header validation to a validation middleware
-- Simplify `DynamoDbRequestRouter` to only dispatch operations and serialize/deserialize JSON
-- Update `Program.cs` to wire the middleware pipeline and health check endpoint
+- Introduce `IDynamoDbCommand` interface and `DynamoDbCommand<TRequest, TResponse>` abstract base class
+- Implement one command class per operation (14 total), grouped into 5 files by operation group
+- Replace the switch expression and `Dispatch<TReq,TRes>` in the router with a dictionary lookup against `IDynamoDbCommand`
+- Update `Program.cs` to wire the middleware pipeline and register commands against `IDynamoDbCommand`
 - Update `specs/server/spec.md` to document the middleware architecture
 
 ## Out of Scope
